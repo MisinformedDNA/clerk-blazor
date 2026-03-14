@@ -34,7 +34,7 @@
         if (string.IsNullOrWhiteSpace(publishableKey) ||
             publishableKey == "YOUR_CLERK_PUBLISHABLE_KEY")
         {
-            Console.Error.WriteLine(
+            Console.WriteLine(
                 "[Clerk] Publishable key is not configured. " +
                 "Set Clerk:PublishableKey in wwwroot/appsettings.json " +
                 "(or wwwroot/appsettings.Development.json for local dev). " +
@@ -42,13 +42,19 @@
             return;
         }
 
-        await ClerkAuth.InitializeAsync(publishableKey);
+        try
+        {
+            await ClerkAuth.InitializeAsync(publishableKey);
 
-        // Register the JS listener so auth state updates automatically.
-        await ClerkAuthStateProvider.RegisterListenerAsync();
+            // Register the JS listener so auth state updates automatically.
+            await ClerkAuthStateProvider.RegisterListenerAsync();
 
-        // Force an initial state refresh so the UI reflects the current session.
-        await ClerkAuthStateProvider.ForceRefreshAsync();
+            // Force an initial state refresh so the UI reflects the current session.
+            await ClerkAuthStateProvider.ForceRefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Clerk] Initialisation failed: {ex.Message}");
+        }
     }
 }
-

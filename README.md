@@ -48,10 +48,14 @@ via a thin C#/JS interop layer.
 └─────────────────────────────────────────────────────┘
 ```
 
-The browser loads the Clerk JS SDK from CDN. The C# `ClerkAuthService` calls
-into `clerkInterop.js` via `IJSRuntime`. The `ClerkAuthenticationStateProvider`
-builds a `ClaimsPrincipal` from the returned user data and feeds it to Blazor's
-`CascadingAuthenticationState`.
+The Clerk JS SDK is **loaded dynamically** from CDN by `clerkInterop.initialize()` only
+after the publishable key has been read from `IConfiguration` (see
+[Configuration & secrets](#configuration--secrets)). This ensures the SDK never
+executes without a valid key — preventing the `Missing publishableKey` error that
+newer versions of `clerk-js` throw at load time when no key is found. The C#
+`ClerkAuthService` calls into `clerkInterop.js` via `IJSRuntime`. The
+`ClerkAuthenticationStateProvider` builds a `ClaimsPrincipal` from the returned
+user data and feeds it to Blazor's `CascadingAuthenticationState`.
 
 ---
 

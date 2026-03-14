@@ -39,6 +39,12 @@ public sealed class ClerkAuthenticationStateProvider
     /// <inheritdoc/>
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
+        // Return anonymous state immediately if Clerk has not been initialized
+        // yet (e.g. during the initial render before OnAfterRenderAsync runs,
+        // or when no publishable key is configured).
+        if (!_clerkService.IsInitialized)
+            return _anonymous;
+
         var user = await _clerkService.GetUserAsync();
         return user is null ? _anonymous : BuildAuthState(user);
     }
@@ -46,7 +52,7 @@ public sealed class ClerkAuthenticationStateProvider
     /// <summary>
     /// Registers the Clerk auth-change listener so that authentication state
     /// is automatically refreshed when the Clerk session changes.
-    /// Call this once after Clerk has been initialised (e.g. from
+    /// Call this once after Clerk has been initialized (e.g. from
     /// <c>OnAfterRenderAsync</c> in <c>App.razor</c>).
     /// </summary>
     public async Task RegisterListenerAsync()
@@ -62,6 +68,9 @@ public sealed class ClerkAuthenticationStateProvider
     /// </summary>
     public async Task ForceRefreshAsync()
     {
+        if (!_clerkService.IsInitialized)
+            return;
+
         var user = await _clerkService.GetUserAsync();
         var state = user is null ? _anonymous : BuildAuthState(user);
         NotifyAuthenticationStateChanged(Task.FromResult(state));

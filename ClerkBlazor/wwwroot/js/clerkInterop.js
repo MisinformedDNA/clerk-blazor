@@ -2,7 +2,12 @@
  * clerkInterop.js
  * ----------------
  * Minimal Blazor JS interop module for Clerk authentication.
- * Wraps the @clerk/clerk-js browser SDK loaded via CDN (see index.html).
+ * Wraps the @clerk/clerk-js browser SDK loaded from CDN.
+ *
+ * The Clerk SDK is loaded *dynamically* inside initialize() so that the CDN
+ * script is never added to the page until we have a valid publishable key.
+ * This prevents the "Missing publishableKey" error that newer clerk-js versions
+ * throw when the browser bundle is loaded without a key configured upfront.
  *
  * Clerk SDK shape (clerk-js >= 5.x):
  *   - window.Clerk is available after the CDN script loads.
@@ -12,33 +17,56 @@
  *   - clerk.signOut()     – signs the current user out.
  *   - clerk.addListener() – fires a callback on every auth state change.
  *
- * If the Clerk API shape changes in a future SDK version, update the
- * references to window.Clerk, clerk.load(), clerk.user, etc. below.
+ * If the Clerk API shape changes in a future SDK version, update the CDN URL
+ * and the references to clerk.load(), clerk.user, etc. below.
  */
 
 window.clerkInterop = (function () {
     /** Internal reference to the loaded Clerk instance. */
     let _clerk = null;
 
+    /** CDN URL for the Clerk browser bundle. Update the version pin if needed. */
+    const CLERK_CDN_URL =
+        'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+
     /**
-     * Initialise Clerk using the publishable key.
-     * Must be called once before any other functions.
+     * Dynamically load the Clerk SDK from CDN and initialise it with the key.
+     *
+     * The script is appended to <head> only when this function is called, so
+     * the SDK never executes without a publishable key being available.
      *
      * @param {string} publishableKey  Your Clerk Publishable Key
      *   (starts with "pk_test_" for development or "pk_live_" for production).
      * @returns {Promise<boolean>} true when Clerk is ready.
      */
     async function initialize(publishableKey) {
+        // Load the SDK script only once.
+        if (!window.Clerk) {
+            await new Promise(function (resolve, reject) {
+                var script = document.createElement('script');
+                script.src = CLERK_CDN_URL;
+                script.async = true;
+                script.crossOrigin = 'anonymous';
+                script.type = 'text/javascript';
+                script.onload = resolve;
+                script.onerror = function () {
+                    reject(new Error(
+                        'Failed to load the Clerk SDK from CDN (' + CLERK_CDN_URL + '). ' +
+                        'Check your internet connection and Content Security Policy settings.'
+                    ));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
         if (!window.Clerk) {
             throw new Error(
-                'Clerk SDK not found on window. ' +
-                'Make sure the <script> tag that loads @clerk/clerk-js is included ' +
-                'in index.html BEFORE the Blazor framework script.'
+                'Clerk SDK was not exposed on window after loading. ' +
+                'Verify the CDN URL in clerkInterop.js points to a valid Clerk browser bundle.'
             );
         }
 
         // Clerk constructor accepts the publishable key directly (clerk-js >= 5).
-        // If you are using an older version adjust the instantiation accordingly.
         _clerk = new window.Clerk(publishableKey);
         await _clerk.load();
         return true;
@@ -128,7 +156,7 @@ window.clerkInterop = (function () {
     function _assertInitialized() {
         if (!_clerk) {
             throw new Error(
-                'Clerk is not initialised. Call clerkInterop.initialize(publishableKey) first.'
+                'Clerk is not initialized. Call clerkInterop.initialize(publishableKey) first.'
             );
         }
     }

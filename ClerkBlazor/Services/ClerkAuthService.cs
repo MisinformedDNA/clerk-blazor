@@ -23,6 +23,9 @@ public sealed class ClerkAuthService
         _js = js;
     }
 
+    /// <summary>Gets a value indicating whether Clerk has been initialized.</summary>
+    public bool IsInitialized => _initialized;
+
     /// <summary>
     /// Initialise the Clerk SDK in the browser.
     /// Must be called once before any other methods, typically in the root
@@ -99,7 +102,7 @@ public sealed class ClerkAuthService
     {
         if (!_initialized)
             throw new InvalidOperationException(
-                "ClerkAuthService is not initialised. " +
+                "ClerkAuthService is not initialized. " +
                 "Call InitializeAsync(publishableKey) before using other methods.");
     }
 }
