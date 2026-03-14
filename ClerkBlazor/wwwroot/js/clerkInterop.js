@@ -2,38 +2,59 @@
  * clerkInterop.js
  * ----------------
  * Minimal Blazor JS interop module for Clerk authentication.
- * Wraps the @clerk/clerk-js browser SDK loaded from CDN.
+ * Wraps the @clerk/clerk-js browser SDK loaded from the Clerk Frontend API CDN.
  *
- * The Clerk SDK is loaded *dynamically* inside initialize() so that the CDN
- * script is never added to the page until we have a valid publishable key.
- * This prevents the "Missing publishableKey" error that newer clerk-js versions
- * throw when the browser bundle is loaded without a key configured upfront.
+ * Loading strategy (clerk-js ≥ 5.x):
+ *   The recommended way to embed clerk-js@5 in a non-bundled app is to load the
+ *   script from the Clerk Frontend API URL (derived from the publishable key) and
+ *   set the key as a `data-clerk-publishable-key` attribute on the script element.
+ *   The SDK auto-initialises itself from that attribute; `window.Clerk` is then the
+ *   ready-to-use Clerk instance (not the class constructor).
+ *   We call `await window.Clerk.load()` to complete initialization, after which
+ *   all SDK methods are available.
  *
- * Clerk SDK shape (clerk-js >= 5.x):
- *   - window.Clerk is available after the CDN script loads.
- *   - Call `await clerk.load()` before using any methods.
- *   - clerk.user          – currently signed-in User object, or null.
- *   - clerk.openSignIn()  – opens the Clerk sign-in modal/UI.
- *   - clerk.signOut()     – signs the current user out.
- *   - clerk.addListener() – fires a callback on every auth state change.
+ * Reference: https://clerk.com/docs/quickstarts/javascript
  *
- * If the Clerk API shape changes in a future SDK version, update the CDN URL
- * and the references to clerk.load(), clerk.user, etc. below.
+ * Clerk SDK shape (clerk-js ≥ 5.x):
+ *   - window.Clerk             – initialized Clerk instance.
+ *   - clerk.user               – currently signed-in User object, or null.
+ *   - clerk.openSignIn()       – opens the Clerk sign-in modal/UI.
+ *   - clerk.signOut()          – signs the current user out.
+ *   - clerk.addListener()      – fires a callback on every auth state change.
  */
 
 window.clerkInterop = (function () {
     /** Internal reference to the loaded Clerk instance. */
     let _clerk = null;
 
-    /** CDN URL for the Clerk browser bundle. Update the version pin if needed. */
-    const CLERK_CDN_URL =
-        'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+    /**
+     * Derive the Clerk Frontend API base URL from a publishable key.
+     *
+     * Publishable keys have the form:
+     *   pk_test_<BASE64URL(domain + "$")>   (development)
+     *   pk_live_<BASE64URL(domain + "$")>   (production)
+     *
+     * @param {string} publishableKey
+     * @returns {string}  e.g. "https://stirring-reptile-19.clerk.accounts.dev"
+     */
+    function getFrontendApiUrl(publishableKey) {
+        const prefix = publishableKey.startsWith('pk_live_') ? 'pk_live_' : 'pk_test_';
+        const encoded = publishableKey.slice(prefix.length);
+        // Clerk uses URL-safe base64 (RFC 4648 §5).  atob() expects standard
+        // base64, so replace the URL-safe chars and add any missing padding.
+        const standard = encoded.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = standard + '='.repeat((4 - standard.length % 4) % 4);
+        const domain = atob(padded).replace(/\$+$/, '');
+        return 'https://' + domain;
+    }
 
     /**
-     * Dynamically load the Clerk SDK from CDN and initialise it with the key.
+     * Load the Clerk SDK from the Clerk Frontend API CDN and initialize it.
      *
-     * The script is appended to <head> only when this function is called, so
-     * the SDK never executes without a publishable key being available.
+     * The script element is given a `data-clerk-publishable-key` attribute so
+     * that the SDK can auto-initialize from it when the script executes.
+     * After the script loads, `window.Clerk` is the ready instance; we call
+     * `load()` on it to complete initialization.
      *
      * @param {string} publishableKey  Your Clerk Publishable Key
      *   (starts with "pk_test_" for development or "pk_live_" for production).
@@ -42,17 +63,24 @@ window.clerkInterop = (function () {
     async function initialize(publishableKey) {
         // Load the SDK script only once.
         if (!window.Clerk) {
+            const frontendApiUrl = getFrontendApiUrl(publishableKey);
+            const cdnUrl = frontendApiUrl + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+
             await new Promise(function (resolve, reject) {
-                var script = document.createElement('script');
-                script.src = CLERK_CDN_URL;
+                const script = document.createElement('script');
+                script.src = cdnUrl;
+                // Provide the key as a data attribute.  The clerk-js IIFE reads
+                // document.currentScript.dataset.clerkPublishableKey at load time
+                // and auto-constructs the Clerk instance, assigning it to window.Clerk.
+                script.setAttribute('data-clerk-publishable-key', publishableKey);
                 script.async = true;
                 script.crossOrigin = 'anonymous';
                 script.type = 'text/javascript';
                 script.onload = resolve;
                 script.onerror = function () {
                     reject(new Error(
-                        'Failed to load the Clerk SDK from CDN (' + CLERK_CDN_URL + '). ' +
-                        'Check your internet connection and Content Security Policy settings.'
+                        'Failed to load the Clerk SDK from ' + cdnUrl + '. ' +
+                        'Check your internet connection and verify your publishable key.'
                     ));
                 };
                 document.head.appendChild(script);
@@ -61,13 +89,14 @@ window.clerkInterop = (function () {
 
         if (!window.Clerk) {
             throw new Error(
-                'Clerk SDK was not exposed on window after loading. ' +
-                'Verify the CDN URL in clerkInterop.js points to a valid Clerk browser bundle.'
+                'Clerk SDK was not initialized after loading from the Clerk Frontend API. ' +
+                'Verify your publishable key is correct and that the Clerk application is active.'
             );
         }
 
-        // Clerk constructor accepts the publishable key directly (clerk-js >= 5).
-        _clerk = new window.Clerk(publishableKey);
+        // window.Clerk is the auto-initialized instance (not the class).
+        // Call load() to complete SDK initialization before using any methods.
+        _clerk = window.Clerk;
         await _clerk.load();
         return true;
     }

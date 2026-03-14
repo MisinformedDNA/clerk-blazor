@@ -12,8 +12,11 @@ public class BlazorDevServer
 {
     private static Process? _process;
 
-    /// <summary>Base URL of the running Blazor WASM dev server.</summary>
-    public static string BaseUrl { get; } = "http://localhost:5107";
+    /// <summary>
+    /// Base URL of the running Blazor WASM dev server.
+    /// Populated by <see cref="StartAsync"/> once the server reports the URL it is listening on.
+    /// </summary>
+    public static string BaseUrl { get; private set; } = "http://localhost:5107";
 
     [OneTimeSetUp]
     public async Task StartAsync()
@@ -35,25 +38,75 @@ public class BlazorDevServer
                 $"ClerkBlazor project not found at expected path '{projectPath}'. " +
                 "Ensure the test is run from within the repository.");
 
+        // Build the project first so `--no-build` makes the run fast.
+        var buildInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"build \"{projectPath}\" -c Debug --nologo -v quiet",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        using (var buildProcess = Process.Start(buildInfo)!)
+        {
+            await buildProcess.WaitForExitAsync().ConfigureAwait(false);
+            if (buildProcess.ExitCode != 0)
+            {
+                var err = await buildProcess.StandardError.ReadToEndAsync().ConfigureAwait(false);
+                throw new InvalidOperationException($"dotnet build failed (exit {buildProcess.ExitCode}):\n{err}");
+            }
+        }
+
+        // The actual listening URL is read from the server's stdout.
+        // ASP.NET Core emits: "Now listening on: http://localhost:XXXX"
+        var urlTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
         _process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = "dotnet",
+                // --no-build because we already built above; this makes startup much faster.
                 Arguments =
                     $"run --project \"{projectPath}\" " +
-                    "--launch-profile http --no-hot-reload",
+                    "--launch-profile http --no-hot-reload --no-build",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
+            },
+            EnableRaisingEvents = true
+        };
+
+        _process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            // "Now listening on: http://localhost:5107" (or whatever port was free)
+            const string marker = "Now listening on: ";
+            var idx = e.Data.IndexOf(marker, StringComparison.Ordinal);
+            if (idx >= 0)
+            {
+                var url = e.Data[(idx + marker.Length)..].Trim();
+                urlTcs.TrySetResult(url);
             }
         };
-        _process.Start();
 
-        // Poll until the server responds (up to 60 seconds).
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        for (var attempt = 0; attempt < 60; attempt++)
+        _process.Start();
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+
+        // Wait for the server to report its URL (up to 120 seconds).
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        cts.Token.Register(() =>
+            urlTcs.TrySetException(new TimeoutException(
+                "Blazor dev server did not report its URL within 120 seconds.")));
+
+        BaseUrl = await urlTcs.Task.ConfigureAwait(false);
+
+        // Extra sanity-check: confirm the server actually responds on that URL.
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        for (var attempt = 0; attempt < 10; attempt++)
         {
             try
             {
@@ -63,14 +116,14 @@ public class BlazorDevServer
             }
             catch (Exception)
             {
-                // Server not ready yet; keep waiting.
+                // Brief delay and retry.
             }
 
             await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
         }
 
         throw new TimeoutException(
-            $"Blazor dev server did not become available on {BaseUrl} within 60 seconds.");
+            $"Blazor dev server started but did not respond on {BaseUrl} within 10 seconds.");
     }
 
     [OneTimeTearDown]
