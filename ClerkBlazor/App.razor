@@ -1,0 +1,53 @@
+@using ClerkBlazor.Services
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject ClerkAuthService ClerkAuth
+@inject ClerkAuthenticationStateProvider ClerkAuthStateProvider
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    @* Redirect to login when an [Authorize] page is accessed without auth. *@
+                    <RedirectToLogin />
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+    </Router>
+</CascadingAuthenticationState>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Read the publishable key that was injected into index.html at build / deploy time.
+        // Adjust the JS expression if you use a different config mechanism.
+        var publishableKey = await JS.InvokeAsync<string?>(
+            "eval", "window.__clerk_config?.publishableKey");
+
+        if (string.IsNullOrWhiteSpace(publishableKey) ||
+            publishableKey == "YOUR_CLERK_PUBLISHABLE_KEY")
+        {
+            Console.Error.WriteLine(
+                "[Clerk] Publishable key is not configured. " +
+                "Set window.__clerk_config.publishableKey in index.html " +
+                "or via a CI/CD environment variable. " +
+                "See README.md for instructions.");
+            return;
+        }
+
+        await ClerkAuth.InitializeAsync(publishableKey);
+
+        // Register the JS listener so auth state updates automatically.
+        await ClerkAuthStateProvider.RegisterListenerAsync();
+
+        // Force an initial state refresh so the UI reflects the current session.
+        await ClerkAuthStateProvider.ForceRefreshAsync();
+    }
+
+    [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
+}
+

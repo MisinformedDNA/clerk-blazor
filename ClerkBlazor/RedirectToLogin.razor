@@ -1,0 +1,11 @@
+@inject NavigationManager Nav
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Redirect to the login page, preserving the current URL as a return
+        // path so the user is sent back after a successful sign-in.
+        var returnUrl = Uri.EscapeDataString(Nav.Uri);
+        Nav.NavigateTo($"/login?returnUrl={returnUrl}", forceLoad: false);
+    }
+}

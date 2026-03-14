@@ -1,0 +1,64 @@
+@page "/login"
+
+@using ClerkBlazor.Services
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject ClerkAuthService ClerkAuth
+@inject AuthenticationStateProvider AuthProvider
+@inject NavigationManager Nav
+
+<PageTitle>Sign in</PageTitle>
+
+<h1>Sign in</h1>
+
+@if (_errorMessage is not null)
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+}
+
+@if (_signingIn)
+{
+    <p>Opening sign-in…</p>
+}
+else
+{
+    <p>Click the button below to sign in with Clerk.</p>
+    <button class="btn btn-primary" @onclick="HandleSignIn" disabled="@_signingIn">
+        Sign in with Clerk
+    </button>
+}
+
+@code {
+    private bool _signingIn;
+    private string? _errorMessage;
+
+    private async Task HandleSignIn()
+    {
+        _signingIn = true;
+        _errorMessage = null;
+
+        try
+        {
+            // Open the Clerk hosted sign-in modal.
+            // The method returns after the user closes the modal.
+            await ClerkAuth.SignInAsync();
+
+            // Ask the provider to re-check the current session.
+            if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
+                await clerkProvider.ForceRefreshAsync();
+
+            // Get the updated auth state to decide where to redirect.
+            var authState = await AuthProvider.GetAuthenticationStateAsync();
+            if (authState.User.Identity?.IsAuthenticated == true)
+                Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Sign-in failed: {ex.Message}";
+        }
+        finally
+        {
+            _signingIn = false;
+        }
+    }
+}
