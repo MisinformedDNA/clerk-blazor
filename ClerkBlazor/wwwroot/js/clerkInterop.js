@@ -21,16 +21,6 @@ window.clerkInterop = (function () {
     let _clerk = null;
 
     /**
-     * Returns the Clerk Publishable Key from window.__clerk_config.
-     * Exposed so that App.razor can read the key without using eval().
-     *
-     * @returns {string|null} The publishable key or null if not configured.
-     */
-    function getPublishableKey() {
-        return (window.__clerk_config && window.__clerk_config.publishableKey) || null;
-    }
-
-    /**
      * Initialise Clerk using the publishable key.
      * Must be called once before any other functions.
      *
@@ -144,5 +134,5 @@ window.clerkInterop = (function () {
     }
 
     // Public API
-    return { getPublishableKey, initialize, openSignIn, getUser, signOut, onAuthChange };
+    return { initialize, openSignIn, getUser, signOut, onAuthChange };
 }());

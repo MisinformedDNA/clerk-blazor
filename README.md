@@ -75,30 +75,29 @@ Create your Clerk app at <https://dashboard.clerk.com>.
    cd clerk-blazor
    ```
 
-2. **Set your Publishable Key in `index.html`**
+2. **Set your Publishable Key in `appsettings.Development.json`**
 
-   Open `ClerkBlazor/wwwroot/index.html` and find:
+   Open `ClerkBlazor/wwwroot/appsettings.Development.json` and replace the
+   placeholder:
 
-   ```js
-   window.__clerk_config = {
-       publishableKey: "YOUR_CLERK_PUBLISHABLE_KEY"
-   };
+   ```json
+   {
+     "Clerk": {
+       "PublishableKey": "pk_test_BYl3uCvG5R4RlKBa"
+     }
+   }
    ```
 
-   Replace `YOUR_CLERK_PUBLISHABLE_KEY` with your **Publishable Key** from the
+   Replace `pk_test_BYl3uCvG5R4RlKBa` with your **Publishable Key** from the
    [Clerk Dashboard → API Keys](https://dashboard.clerk.com) page.
 
-   Example (development key — do not commit your real key):
+   The Blazor WASM runtime automatically merges `appsettings.json` (default)
+   and `appsettings.Development.json` (development overlay) at startup via
+   `IConfiguration`.
 
-   ```js
-   window.__clerk_config = {
-       publishableKey: "pk_test_BYl3uCvG5R4RlKBa"
-   };
-   ```
-
-   > ⚠️ **Do NOT commit a real Publishable Key to source control.** Use
-   > environment substitution at build time (see
-   > [CI/CD section](#required-github-secrets)) or the `.env` approach below.
+   > ℹ️ The Clerk Publishable Key (`pk_test_…` / `pk_live_…`) is **not** a
+   > secret — it is intentionally public. The actual secret is `CLERK_SECRET`
+   > (used server-side only). Never add `CLERK_SECRET` to any appsettings file.
 
 3. **Run the app**
 
@@ -138,13 +137,24 @@ For **production** add the equivalent URLs for your deployed domain.
 The Publishable Key (`pk_test_…` / `pk_live_…`) is a **non-secret** value that
 is safe to ship in the browser bundle. It identifies your Clerk application.
 
-Recommended ways to supply it, in order of preference:
+Configuration is read from `wwwroot/appsettings.json` (default) and
+`wwwroot/appsettings.Development.json` (development overlay) via the standard
+Blazor WASM `IConfiguration` mechanism.
 
-| Method | How |
-|--------|-----|
-| **CI/CD substitution** | Store as `CLERK_PUBLISHABLE_KEY` GitHub Secret; use a build step (below) to replace the placeholder in `index.html` before publish. |
-| **Local dev** | Edit `index.html` directly; add `index.html` to your personal `.gitignore_global` or use `git update-index --skip-worktree` to avoid accidental commits. |
-| **Environment variable** | Pass to a pre-publish script that patches `index.html`. |
+| File | Purpose |
+|------|---------|
+| `wwwroot/appsettings.json` | Committed default — contains placeholder. Update for production at build time via CI/CD. |
+| `wwwroot/appsettings.Development.json` | Local dev overlay — replace the placeholder with your dev key. |
+
+For CI/CD, patch `appsettings.json` using a GitHub Actions step (see
+[Required GitHub Secrets](#required-github-secrets)):
+
+```yaml
+- name: Patch Clerk publishable key into appsettings.json
+  run: |
+    sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
+      ClerkBlazor/wwwroot/appsettings.json
+```
 
 #### Secret Key (server-side only — never in the browser)
 
@@ -176,10 +186,10 @@ Add these secrets to your GitHub repository
 #### Example GitHub Actions workflow snippet
 
 ```yaml
-- name: Patch Clerk publishable key into index.html
+- name: Patch Clerk publishable key into appsettings.json
   run: |
     sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
-      ClerkBlazor/wwwroot/index.html
+      ClerkBlazor/wwwroot/appsettings.json
 
 - name: Publish
   run: dotnet publish ClerkBlazor/ClerkBlazor.csproj -c Release -o publish/
@@ -216,6 +226,8 @@ ClerkBlazor/
 │   └── NavMenu.razor                  # Login/logout links
 │
 └── wwwroot/
+    ├── appsettings.json               # Default config (Clerk:PublishableKey placeholder)
+    ├── appsettings.Development.json   # Dev overlay — replace placeholder with your key
     ├── index.html                     # Loads Clerk CDN + clerkInterop.js
     └── js/
         └── clerkInterop.js            # JS interop module (Clerk SDK wrapper)
@@ -258,9 +270,11 @@ not covered by this MVP.
 
 ### Security notes
 
-- **Do not commit secrets.** The `.gitignore` already ignores `*.env` files. If
-  you edit `index.html` locally, use `git update-index --skip-worktree
-  ClerkBlazor/wwwroot/index.html` to prevent accidental commits.
+- **Do not commit secrets.** The `.gitignore` already ignores `*.env` files.
+  `appsettings.Development.json` ships with a placeholder — replace it locally
+  with your real dev key. Use `git update-index --skip-worktree
+  ClerkBlazor/wwwroot/appsettings.Development.json` to prevent accidental
+  commits once you add a real key.
 - **Rotate test credentials** after sharing them or testing in CI.
 - **Use HTTPS** in all environments. The Blazor dev server defaults to
   `https://localhost:7077`.

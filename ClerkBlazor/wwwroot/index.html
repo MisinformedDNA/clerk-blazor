@@ -17,11 +17,6 @@
         Clerk JavaScript SDK (latest stable).
         Loads the Clerk browser bundle and exposes window.Clerk.
 
-        IMPORTANT: Do NOT set data-clerk-publishable-key here in source code.
-        Instead, set it dynamically from the inline <script> block below,
-        reading from window.__clerk_config which is populated at build time or
-        via environment-specific configuration (see README for details).
-
         CDN URL reference: https://clerk.com/docs/quickstarts/javascript
         If Clerk releases a new major version, update the @latest pin below
         and verify the API shape in wwwroot/js/clerkInterop.js.
@@ -57,30 +52,6 @@
 
     <!-- Clerk JS interop helpers used by ClerkAuthService. -->
     <script src="js/clerkInterop.js"></script>
-
-    <!--
-        Runtime configuration injected at startup.
-        Replace the placeholder value with your real Publishable Key.
-
-        Recommended approaches (in order of preference):
-          1. CI/CD: substitute CLERK_PUBLISHABLE_KEY from a GitHub Secret
-             during the build (e.g. sed or a .NET publish profile transform).
-          2. Local dev: edit this file directly; the .gitignore ignores *.env
-             but not index.html, so be careful not to commit real keys.
-          3. Production: generate this block server-side from a secure config
-             store (Azure Key Vault, AWS Secrets Manager, etc.).
-
-        See README.md – "Clerk Blazor WASM Integration" for full instructions.
-    -->
-    <script>
-        window.__clerk_config = {
-            // REPLACE with your Clerk Publishable Key (pk_test_… or pk_live_…).
-            // For local development you can also set this to the example key:
-            //   BYl3uCvG5R4RlKBa
-            // Do NOT commit a real production key here.
-            publishableKey: "YOUR_CLERK_PUBLISHABLE_KEY"
-        };
-    </script>
 </body>
 
 </html>

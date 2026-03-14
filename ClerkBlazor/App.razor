@@ -1,8 +1,10 @@
 @using ClerkBlazor.Services
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.Configuration
 
 @inject ClerkAuthService ClerkAuth
 @inject ClerkAuthenticationStateProvider ClerkAuthStateProvider
+@inject IConfiguration Configuration
 
 <CascadingAuthenticationState>
     <Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
@@ -23,18 +25,19 @@
     {
         if (!firstRender) return;
 
-        // Read the publishable key from window.__clerk_config via the dedicated
-        // clerkInterop helper (avoids eval()).
-        var publishableKey = await JS.InvokeAsync<string?>(
-            "clerkInterop.getPublishableKey");
+        // Read the publishable key from appsettings.json / appsettings.Development.json.
+        // Override per environment by editing the appropriate file in wwwroot/.
+        // For CI/CD, substitute the value at build time from the CLERK_PUBLISHABLE_KEY
+        // GitHub Secret — see README.md for a sample workflow.
+        var publishableKey = Configuration["Clerk:PublishableKey"];
 
         if (string.IsNullOrWhiteSpace(publishableKey) ||
             publishableKey == "YOUR_CLERK_PUBLISHABLE_KEY")
         {
             Console.Error.WriteLine(
                 "[Clerk] Publishable key is not configured. " +
-                "Set window.__clerk_config.publishableKey in index.html " +
-                "or via a CI/CD environment variable. " +
+                "Set Clerk:PublishableKey in wwwroot/appsettings.json " +
+                "(or wwwroot/appsettings.Development.json for local dev). " +
                 "See README.md for instructions.");
             return;
         }
@@ -47,7 +50,5 @@
         // Force an initial state refresh so the UI reflects the current session.
         await ClerkAuthStateProvider.ForceRefreshAsync();
     }
-
-    [Inject] private Microsoft.JSInterop.IJSRuntime JS { get; set; } = default!;
 }
 
