@@ -23,10 +23,10 @@
     {
         if (!firstRender) return;
 
-        // Read the publishable key that was injected into index.html at build / deploy time.
-        // Adjust the JS expression if you use a different config mechanism.
+        // Read the publishable key from window.__clerk_config via the dedicated
+        // clerkInterop helper (avoids eval()).
         var publishableKey = await JS.InvokeAsync<string?>(
-            "eval", "window.__clerk_config?.publishableKey");
+            "clerkInterop.getPublishableKey");
 
         if (string.IsNullOrWhiteSpace(publishableKey) ||
             publishableKey == "YOUR_CLERK_PUBLISHABLE_KEY")
