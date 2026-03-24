@@ -11,8 +11,16 @@
         <Found Context="routeData">
             <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
                 <NotAuthorized>
-                    @* Redirect to login when an [Authorize] page is accessed without auth. *@
-                    <RedirectToLogin />
+                    @* Redirect only after Clerk has initialized; otherwise we can
+                       incorrectly bounce already-signed-in users during first render. *@
+                    @if (!ClerkAuth.IsInitialized)
+                    {
+                        <p>Checking authentication…</p>
+                    }
+                    else
+                    {
+                        <RedirectToLogin />
+                    }
                 </NotAuthorized>
             </AuthorizeRouteView>
             <FocusOnNavigate RouteData="@routeData" Selector="h1" />
