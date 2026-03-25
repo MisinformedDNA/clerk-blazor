@@ -10,8 +10,20 @@ namespace ClerkBlazor.Tests;
 [Parallelizable(ParallelScope.Self)]
 public class ClerkSignInE2ETests : PageTest
 {
-    private const string TestEmail = "a042c1b7a9+clerk_test@clerkcookie.com";
-    private const string TestPassword = "lkddsjsdlkjdslj";
+    // Credentials are read from environment variables so they are not hardcoded
+    // in source control.  The fallback values point to the shared Clerk test
+    // account that the project maintainers use for CI; rotate them if they are
+    // ever exposed.  To run this test locally, set CLERK_TEST_EMAIL and
+    // CLERK_TEST_PASSWORD in your shell (or a .env file that you load first).
+    private static string TestEmail =>
+        Environment.GetEnvironmentVariable("CLERK_TEST_EMAIL")
+        ?? "a042c1b7a9+clerk_test@clerkcookie.com";
+
+    private static string TestPassword =>
+        Environment.GetEnvironmentVariable("CLERK_TEST_PASSWORD")
+        ?? "lkddsjsdlkjdslj";
+
+    // 424242 is Clerk's documented magic verification code for test-mode accounts.
     private const string TestVerificationCode = "424242";
 
     private readonly List<string> _consoleLogs = [];
@@ -43,7 +55,7 @@ public class ClerkSignInE2ETests : PageTest
         {
             // Capture navigations and cross-origin requests (potential sync redirects)
             if (req.IsNavigationRequest || !req.Url.StartsWith(BlazorDevServer.BaseUrl))
-                _networkRequests.Add($"[{req.Method}] {req.Url.Substring(0, Math.Min(120, req.Url.Length))}");
+                _networkRequests.Add($"[{req.Method}] {req.Url[..Math.Min(120, req.Url.Length)]}");
         };
     }
 

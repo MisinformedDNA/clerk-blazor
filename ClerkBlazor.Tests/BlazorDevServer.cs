@@ -14,6 +14,12 @@ public class BlazorDevServer
 {
     private static Process? _process;
 
+    /// <summary>Maximum number of characters retained in the in-memory log buffer.</summary>
+    private const int MaxLogBufferLength = 64_000;
+
+    /// <summary>How long to wait for the dev server to become reachable before giving up.</summary>
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(120);
+
     /// <summary>
     /// Base URL of the running Blazor WASM dev server.
     /// Populated by <see cref="StartAsync"/> once the server reports the URL it is listening on.
@@ -69,7 +75,7 @@ public class BlazorDevServer
 
             lock (logLock)
             {
-                if (logBuffer.Length < 64000)
+                if (logBuffer.Length < MaxLogBufferLength)
                     logBuffer.AppendLine($"{prefix}{line}");
             }
         }
@@ -102,7 +108,7 @@ public class BlazorDevServer
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
 
-        using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var startupCts = new CancellationTokenSource(StartupTimeout);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
         while (!startupCts.IsCancellationRequested)
@@ -141,7 +147,7 @@ public class BlazorDevServer
         }
 
         throw new TimeoutException(
-            $"Blazor dev server did not become reachable on {BaseUrl} within 120 seconds.{Environment.NewLine}{logBuffer}");
+            $"Blazor dev server did not become reachable on {BaseUrl} within {StartupTimeout.TotalSeconds:0}s.{Environment.NewLine}{logBuffer}");
     }
 
     private static int GetFreeTcpPort()

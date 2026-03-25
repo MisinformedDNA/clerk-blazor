@@ -27,6 +27,9 @@ window.clerkInterop = (function () {
     /** Internal reference to the loaded Clerk instance. */
     let _clerk = null;
 
+    /** True while a setActive call is in flight; prevents re-entrant activations. */
+    let _activating = false;
+
     /**
      * Derive the Clerk Frontend API base URL from a publishable key.
      *
@@ -159,9 +162,6 @@ window.clerkInterop = (function () {
         _assertInitialized();
         await _clerk.signOut();
     }
-
-    /** True while a setActive call is in flight; prevents re-entrant activations. */
-    let _activating = false;
 
     /**
      * Register a .NET callback that fires whenever the Clerk auth state changes.

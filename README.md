@@ -83,10 +83,10 @@ Clicking **Sign in** from any page:
 7. Blazor's `CascadingAuthenticationState` propagates the new state to all
    `<AuthorizeView>` components — the UI updates in-place with no page reload.
 
-**Key implementation detail**: `openSignIn()` uses a hash-fragment redirect URL
-(`window.location.pathname + '#'`) so that after sign-in Clerk performs only a
-hash-fragment navigation. A hash change does not cause a full-page reload, which
-keeps the Blazor WASM runtime alive and in memory.
+**Key implementation detail**: `openSignIn()` redirects back to the same document
+using a hash-fragment URL (`window.location.pathname + window.location.search + '#auth-complete'`).
+A hash change does not cause a full-page reload, which keeps the Blazor WASM
+runtime alive and in memory.
 
 > **Bug that was fixed**: An earlier version called `await _clerk.load()` inside
 > the `addListener` callback. This is problematic for two reasons: (1) `_clerk.load()`
@@ -326,6 +326,7 @@ real credentials.
 | `HomePageTests` | Page load, heading, title, no JS errors, Sign in link visible |
 | `LoginPageTests` | Page load, heading, title, no JS errors, Sign in button visible |
 | `SignInFlowTests` | `openSignIn` is called on button click; UI updates to authorized view without page reload; protected pages accessible after sign-in; no JS errors during flow |
+| `ClerkSignInE2ETests` | Full sign-in with real Clerk credentials and OTP verification; Sign out link appears; Blazor WASM runtime stays alive (requires `CLERK_TEST_EMAIL` / `CLERK_TEST_PASSWORD` env vars) |
 
 ---
 
