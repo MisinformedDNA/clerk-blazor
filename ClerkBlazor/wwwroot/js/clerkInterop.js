@@ -103,24 +103,23 @@ window.clerkInterop = (function () {
 
     /**
      * Open the Clerk sign-in modal (hosted UI).
-     * Note: openSignIn() opens UI and returns immediately.
+     * Note: openSignIn() opens UI and returns immediately; the JS addListener
+     * callback (registered via onAuthChange) fires when authentication completes.
      *
      * @returns {Promise<void>}
      */
     async function openSignIn() {
         _assertInitialized();
 
-        // Use documented SignInProps only.
-        // Keep redirect on the current document by targeting a hash URL.
-        const sameDocumentRedirectUrl =
-            window.location.pathname + window.location.search + '#auth-complete';
+        // Redirect to a hash-only URL after sign-in so the browser performs a
+        // hash-fragment navigation instead of a full-page reload.  A hash change
+        // keeps the Blazor WASM runtime alive and in memory.
+        const hashRedirectUrl =
+            window.location.pathname + window.location.search + '#';
 
         _clerk.openSignIn({
-            routing: 'hash',
-            fallbackRedirectUrl: sameDocumentRedirectUrl,
-            forceRedirectUrl: sameDocumentRedirectUrl,
-            signUpFallbackRedirectUrl: sameDocumentRedirectUrl,
-            signUpForceRedirectUrl: sameDocumentRedirectUrl
+            forceRedirectUrl: hashRedirectUrl,
+            signUpForceRedirectUrl: hashRedirectUrl,
         });
     }
 
@@ -170,20 +169,17 @@ window.clerkInterop = (function () {
 
         // addListener fires on auth state updates.
         const unsubscribe = _clerk.addListener(async ({ user, session }) => {
-            // In some sign-in flows, a session exists before Clerk marks it
-            // active in-memory. Ensure it is activated so `isSignedIn`/`user`
-            // update without a full page refresh.
+            // When a new session exists but has not been made active yet, activate it.
+            // setActive() triggers a second listener invocation; return early here so
+            // the second call (where _clerk.user is populated) emits to .NET instead.
             if (!_clerk.isSignedIn && session?.id) {
                 try {
                     await _clerk.setActive({ session: session.id });
                 } catch {
-                    // Fall through and continue with the best available state.
+                    // Fall through and emit with the best available state.
                 }
+                return;
             }
-
-            // Re-hydrate Clerk state so `_clerk.user` is current before emitting
-            // to .NET (avoids requiring a manual page refresh).
-            await _clerk.load();
 
             const resolvedUser = _clerk.user ?? user ?? null;
 
@@ -196,10 +192,6 @@ window.clerkInterop = (function () {
                     lastName: resolvedUser.lastName ?? null,
                     imageUrl: resolvedUser.imageUrl ?? null
                 });
-            }
-
-            if (window.location.hash === '#auth-complete') {
-                window.history.replaceState({}, '', window.location.pathname + window.location.search);
             }
 
             await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
