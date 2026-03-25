@@ -21,8 +21,8 @@ namespace ClerkBlazor.Tests;
 [Parallelizable(ParallelScope.Self)]
 public class ClerkSignInE2ETests : PageTest
 {
-    private const string TestEmail = "test@test.com";
-    private const string TestPassword = "password"; // TODO: rotate to a non-compromised password
+    private const string TestEmail = "a042c1b7a9+clerk_test@clerkcookie.com";
+    private const string TestPassword = "lkddsjsdlkjdslj";
 
     private readonly List<string> _consoleErrors = [];
     private readonly List<string> _consoleLogs = [];
