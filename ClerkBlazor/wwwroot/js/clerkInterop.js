@@ -27,6 +27,9 @@ window.clerkInterop = (function () {
     /** Internal reference to the loaded Clerk instance. */
     let _clerk = null;
 
+    /** True while a setActive call is in flight; prevents re-entrant activations. */
+    let _activating = false;
+
     /**
      * Derive the Clerk Frontend API base URL from a publishable key.
      *
@@ -98,12 +101,14 @@ window.clerkInterop = (function () {
         // Call load() to complete SDK initialization before using any methods.
         _clerk = window.Clerk;
         await _clerk.load();
+
         return true;
     }
 
     /**
      * Open the Clerk sign-in modal (hosted UI).
-     * Note: openSignIn() opens UI and returns immediately.
+     * Note: openSignIn() opens UI and returns immediately; the JS addListener
+     * callback (registered via onAuthChange) fires when authentication completes.
      *
      * @returns {Promise<void>}
      */
@@ -112,6 +117,8 @@ window.clerkInterop = (function () {
 
         // Use documented SignInProps only.
         // Keep redirect on the current document by targeting a hash URL.
+        // This prevents a full-page reload after sign-in while keeping the
+        // Blazor WASM runtime alive; auth state is propagated via addListener.
         const sameDocumentRedirectUrl =
             window.location.pathname + window.location.search + '#auth-complete';
 
@@ -168,33 +175,64 @@ window.clerkInterop = (function () {
     function onAuthChange(dotNetRef) {
         _assertInitialized();
 
-        // addListener fires on auth state updates.
+        // addListener fires on every auth state change (sign-in, sign-out,
+        // session switch, token refresh).
+        //
+        // Per Clerk docs, the user/session params passed to the callback reflect
+        // the new state — reading _clerk.user synchronously or calling
+        // _clerk.load() inside the callback introduces race conditions and should
+        // be avoided.
+        //
+        // In Clerk's hash-routing flow, after sign-in completes:
+        //   • Clerk fires the listener with { user: null/undefined, session: undefined }
+        //     (the session has been created on the server but not yet activated
+        //     client-side in _clerk.user / _clerk.session).
+        //   • _clerk.client.activeSessions contains the new session object.
+        //   • Calling setActive() activates the session and populates _clerk.user.
+        //
+        // State legend (callback params):
+        //   user === undefined, session === undefined, activeSessions empty
+        //     → Clerk is still initialising; skip this tick.
+        //   user === null, session resolved or activeSessions non-empty
+        //     → Transitional / sign-out; call setActive if a session is pending,
+        //       otherwise emit null (anonymous).
+        //   user === {...}
+        //     → Signed in; user data is ready.
         const unsubscribe = _clerk.addListener(async ({ user, session }) => {
-            // In some sign-in flows, a session exists before Clerk marks it
-            // active in-memory. Ensure it is activated so `isSignedIn`/`user`
-            // update without a full page refresh.
-            if (!_clerk.isSignedIn && session?.id) {
-                try {
-                    await _clerk.setActive({ session: session.id });
-                } catch {
-                    // Fall through and continue with the best available state.
+            // Pure loading: Clerk hasn't determined session state yet — skip.
+            if (user === undefined && !session?.id && !_clerk.client?.activeSessions?.length) {
+                return;
+            }
+
+            // If user isn't populated yet but a session exists (in the callback
+            // param or already in _clerk.client.activeSessions), call setActive so
+            // _clerk.user becomes available.  The _activating flag prevents
+            // re-entrant calls while setActive is in flight.
+            if (!user && !_activating) {
+                const pendingSession = session?.id
+                    ? session
+                    : _clerk.client?.activeSessions?.[0];
+                if (pendingSession?.id) {
+                    _activating = true;
+                    try {
+                        await _clerk.setActive({ session: pendingSession.id });
+                        user = _clerk.user;
+                    } catch {
+                        user = _clerk.user ?? null;
+                    } finally {
+                        _activating = false;
+                    }
                 }
             }
 
-            // Re-hydrate Clerk state so `_clerk.user` is current before emitting
-            // to .NET (avoids requiring a manual page refresh).
-            await _clerk.load();
-
-            const resolvedUser = _clerk.user ?? user ?? null;
-
             let userJson = null;
-            if (resolvedUser) {
+            if (user) {
                 userJson = JSON.stringify({
-                    id: resolvedUser.id,
-                    email: resolvedUser.primaryEmailAddress?.emailAddress ?? null,
-                    firstName: resolvedUser.firstName ?? null,
-                    lastName: resolvedUser.lastName ?? null,
-                    imageUrl: resolvedUser.imageUrl ?? null
+                    id: user.id,
+                    email: user.primaryEmailAddress?.emailAddress ?? null,
+                    firstName: user.firstName ?? null,
+                    lastName: user.lastName ?? null,
+                    imageUrl: user.imageUrl ?? null
                 });
             }
 
@@ -202,7 +240,11 @@ window.clerkInterop = (function () {
                 window.history.replaceState({}, '', window.location.pathname + window.location.search);
             }
 
-            await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
+            try {
+                await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
+            } catch (err) {
+                console.error('[clerkInterop] OnAuthStateChanged failed:', err?.message ?? err);
+            }
         });
 
         return unsubscribe;

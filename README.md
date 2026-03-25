@@ -20,14 +20,16 @@ via a thin C#/JS interop layer.
 ### Table of Contents
 
 1. [Architecture overview](#architecture-overview)
-2. [Prerequisites](#prerequisites)
-3. [Quick start (local development)](#quick-start-local-development)
-4. [Redirect URLs](#redirect-urls)
-5. [Configuration & secrets](#configuration--secrets)
-6. [Required GitHub Secrets](#required-github-secrets)
-7. [Project structure](#project-structure)
-8. [Extending the integration](#extending-the-integration)
-9. [Security notes](#security-notes)
+2. [Sign-in flow (no page reload)](#sign-in-flow-no-page-reload)
+3. [Prerequisites](#prerequisites)
+4. [Quick start (local development)](#quick-start-local-development)
+5. [Redirect URLs](#redirect-urls)
+6. [Configuration & secrets](#configuration--secrets)
+7. [Required GitHub Secrets](#required-github-secrets)
+8. [Project structure](#project-structure)
+9. [Running tests](#running-tests)
+10. [Extending the integration](#extending-the-integration)
+11. [Security notes](#security-notes)
 
 ---
 
@@ -44,7 +46,8 @@ via a thin C#/JS interop layer.
 │  ClerkAuthenticationStateProvider                   │
 │   ├─ GetAuthenticationStateAsync()                  │
 │   ├─ ForceRefreshAsync()                            │
-│   └─ NotifySignOut()                                │
+│   ├─ NotifySignOut()                                │
+│   └─ OnAuthStateChanged(userJson?) ◄── JS callback  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -56,6 +59,43 @@ newer versions of `clerk-js` throw at load time when no key is found. The C#
 `ClerkAuthService` calls into `clerkInterop.js` via `IJSRuntime`. The
 `ClerkAuthenticationStateProvider` builds a `ClaimsPrincipal` from the returned
 user data and feeds it to Blazor's `CascadingAuthenticationState`.
+
+---
+
+### Sign-in flow (no page reload)
+
+Clicking **Sign in** from any page:
+
+1. `NavMenu.razor` calls `ClerkAuthService.SignInAsync()`, which calls
+   `clerkInterop.openSignIn()` in JavaScript.
+2. The Clerk hosted sign-in modal opens. `openSignIn()` returns immediately —
+   the JS runtime remains on the same page.
+3. The user completes sign-in inside the modal.
+4. Clerk fires the `addListener` callback registered via `clerkInterop.onAuthChange()`.
+5. In Clerk's hash-routing flow, after sign-in completes, Clerk fires the listener
+   with `{ user: null/undefined, session: undefined }`. The new session is already
+   present in `_clerk.client.activeSessions` but not yet activated client-side.
+   `setActive()` is called with that session; once it resolves, `_clerk.user` is
+   populated and its JSON is sent to .NET via
+   `DotNetObjectReference.invokeMethodAsync('OnAuthStateChanged', userJson)`.
+6. `ClerkAuthenticationStateProvider.OnAuthStateChanged` deserializes the user,
+   builds a `ClaimsPrincipal`, and calls `NotifyAuthenticationStateChanged`.
+7. Blazor's `CascadingAuthenticationState` propagates the new state to all
+   `<AuthorizeView>` components — the UI updates in-place with no page reload.
+
+**Key implementation detail**: `openSignIn()` redirects back to the same document
+using a hash-fragment URL (`window.location.pathname + window.location.search + '#auth-complete'`).
+A hash change does not cause a full-page reload, which keeps the Blazor WASM
+runtime alive and in memory.
+
+> **Bug that was fixed**: An earlier version called `await _clerk.load()` inside
+> the `addListener` callback. This is problematic for two reasons: (1) `_clerk.load()`
+> is idempotent after the first call — it does not re-fetch state; (2) calling it
+> inside the listener can trigger re-entrant listener invocations with stale null
+> state, overwriting the authenticated user. The fix instead reads the pending
+> session from `_clerk.client.activeSessions`, calls `setActive()` to activate it,
+> and reads `_clerk.user` directly after `setActive()` resolves — all within the
+> same callback invocation.
 
 ---
 
@@ -112,7 +152,8 @@ Create your Clerk app at <https://dashboard.clerk.com>.
    ```
 
 4. Click **Sign in** in the navigation bar. The Clerk hosted sign-in modal
-   will appear.
+   will appear. After completing sign-in, the page does **not** reload — the
+   navigation bar updates in-place to show the authenticated view.
 
 ---
 
@@ -227,15 +268,65 @@ ClerkBlazor/
 │
 ├── Layout/
 │   ├── MainLayout.razor               # Shows current user in top bar
-│   └── NavMenu.razor                  # Login/logout links
+│   └── NavMenu.razor                  # Login/logout links + Sign in button
 │
 └── wwwroot/
     ├── appsettings.json               # Default config (Clerk:PublishableKey placeholder)
     ├── appsettings.Development.json   # Dev overlay — replace placeholder with your key
-    ├── index.html                     # Loads Clerk CDN + clerkInterop.js
+    ├── index.html                     # Loads clerkInterop.js
     └── js/
         └── clerkInterop.js            # JS interop module (Clerk SDK wrapper)
+
+ClerkBlazor.Tests/
+├── BlazorDevServer.cs                 # Assembly fixture: builds & starts dev server
+├── FakeJSRuntime.cs                   # Mock IJSRuntime for unit tests
+├── ClerkAuthServiceTests.cs           # Unit tests for ClerkAuthService
+├── ClerkAuthStateProviderTests.cs     # Unit tests for ClerkAuthenticationStateProvider
+├── SignInFlowTests.cs                 # Playwright tests for the sign-in flow
+├── HomePageTests.cs                   # Playwright tests for the Home page
+└── LoginPageTests.cs                  # Playwright tests for the Login page
 ```
+
+---
+
+### Running tests
+
+The test suite combines **unit tests** (fast, no browser required) and
+**Playwright end-to-end tests** (requires the Blazor dev server to start).
+
+```bash
+# Run the full suite (unit + Playwright)
+cd ClerkBlazor.Tests
+dotnet test
+
+# Run only unit tests (no server needed)
+dotnet test --filter "FullyQualifiedName~ClerkAuthServiceTests|FullyQualifiedName~ClerkAuthStateProviderTests"
+
+# Run only Playwright tests
+dotnet test --filter "FullyQualifiedName~HomePageTests|FullyQualifiedName~LoginPageTests|FullyQualifiedName~SignInFlowTests"
+```
+
+#### Unit tests
+
+| Class | What is tested |
+|-------|---------------|
+| `ClerkAuthServiceTests` | `IsInitialized` lifecycle, JS calls for sign-in/sign-out/get-user, idempotent initialization |
+| `ClerkAuthStateProviderTests` | `OnAuthStateChanged` with null and valid JSON, claim mapping, `ForceRefreshAsync` notifications |
+
+#### Playwright tests
+
+The Playwright tests start the Blazor dev server automatically via
+`BlazorDevServer` (`[SetUpFixture]`).  The sign-in flow tests replace
+`clerkInterop.js` at the network level with a mock that fires the .NET auth
+callback immediately, so they run without contacting Clerk's CDN or requiring
+real credentials.
+
+| Class | What is tested |
+|-------|---------------|
+| `HomePageTests` | Page load, heading, title, no JS errors, Sign in link visible |
+| `LoginPageTests` | Page load, heading, title, no JS errors, Sign in button visible |
+| `SignInFlowTests` | `openSignIn` is called on button click; UI updates to authorized view without page reload; protected pages accessible after sign-in; no JS errors during flow |
+| `ClerkSignInE2ETests` | Full sign-in with real Clerk credentials and OTP verification; Sign out link appears; Blazor WASM runtime stays alive (requires `CLERK_TEST_EMAIL` / `CLERK_TEST_PASSWORD` env vars) |
 
 ---
 
@@ -282,8 +373,8 @@ not covered by this MVP.
 - **Rotate test credentials** after sharing them or testing in CI.
 - **Use HTTPS** in all environments. The Blazor dev server defaults to
   `https://localhost:7077`.
-- **Content Security Policy**: if you add a CSP header, allow the Clerk CDN
-  (`cdn.jsdelivr.net`) and Clerk's own domain (`*.clerk.accounts.dev`).
+- **Content Security Policy**: if you add a CSP header, allow the Clerk Frontend
+  API CDN (`*.clerk.accounts.dev`) for `script-src` and `connect-src`.
 - **Token storage**: Clerk JS manages tokens in memory / HTTP-only cookies. Do
   not store session tokens in `localStorage` or `sessionStorage`.
 
