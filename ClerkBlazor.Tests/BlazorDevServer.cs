@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
 
 namespace ClerkBlazor.Tests;
 
@@ -58,9 +60,22 @@ public class BlazorDevServer
             }
         }
 
-        // The actual listening URL is read from the server's stdout.
-        // ASP.NET Core emits: "Now listening on: http://localhost:XXXX"
-        var urlTcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var logBuffer = new StringBuilder();
+        var logLock = new object();
+        void AppendLog(string prefix, string? line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                return;
+
+            lock (logLock)
+            {
+                if (logBuffer.Length < 64000)
+                    logBuffer.AppendLine($"{prefix}{line}");
+            }
+        }
+
+        var port = GetFreeTcpPort();
+        BaseUrl = $"http://127.0.0.1:{port}";
 
         _process = new Process
         {
@@ -70,7 +85,7 @@ public class BlazorDevServer
                 // --no-build because we already built above; this makes startup much faster.
                 Arguments =
                     $"run --project \"{projectPath}\" " +
-                    "--launch-profile http --no-hot-reload --no-build",
+                    "--no-hot-reload --no-build --no-launch-profile",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -79,51 +94,68 @@ public class BlazorDevServer
             EnableRaisingEvents = true
         };
 
-        _process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is null) return;
-            // "Now listening on: http://localhost:5107" (or whatever port was free)
-            const string marker = "Now listening on: ";
-            var idx = e.Data.IndexOf(marker, StringComparison.Ordinal);
-            if (idx >= 0)
-            {
-                var url = e.Data[(idx + marker.Length)..].Trim();
-                urlTcs.TrySetResult(url);
-            }
-        };
+        _process.StartInfo.Environment["ASPNETCORE_URLS"] = BaseUrl;
+        _process.OutputDataReceived += (_, e) => AppendLog("OUT: ", e.Data);
+        _process.ErrorDataReceived += (_, e) => AppendLog("ERR: ", e.Data);
 
         _process.Start();
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
 
-        // Wait for the server to report its URL (up to 120 seconds).
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        cts.Token.Register(() =>
-            urlTcs.TrySetException(new TimeoutException(
-                "Blazor dev server did not report its URL within 120 seconds.")));
+        using var startupCts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
-        BaseUrl = await urlTcs.Task.ConfigureAwait(false);
-
-        // Extra sanity-check: confirm the server actually responds on that URL.
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        for (var attempt = 0; attempt < 10; attempt++)
+        while (!startupCts.IsCancellationRequested)
         {
+            if (_process.HasExited)
+            {
+                throw new InvalidOperationException(
+                    $"Blazor dev server exited with code {_process.ExitCode} before becoming ready.{Environment.NewLine}{logBuffer}");
+            }
+
             try
             {
-                using var response = await http.GetAsync(BaseUrl).ConfigureAwait(false);
+                using var response = await http.GetAsync(BaseUrl, startupCts.Token).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
                     return;
+
+                AppendLog("HTTP: ", $"Received {(int)response.StatusCode} from {BaseUrl}.");
             }
-            catch (Exception)
+            catch (OperationCanceledException) when (startupCts.IsCancellationRequested)
             {
-                // Brief delay and retry.
+                break;
+            }
+            catch (Exception ex)
+            {
+                AppendLog("HTTP: ", ex.Message);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), startupCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (startupCts.IsCancellationRequested)
+            {
+                break;
+            }
         }
 
         throw new TimeoutException(
-            $"Blazor dev server started but did not respond on {BaseUrl} within 10 seconds.");
+            $"Blazor dev server did not become reachable on {BaseUrl} within 120 seconds.{Environment.NewLine}{logBuffer}");
+    }
+
+    private static int GetFreeTcpPort()
+    {
+        var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
     }
 
     [OneTimeTearDown]
