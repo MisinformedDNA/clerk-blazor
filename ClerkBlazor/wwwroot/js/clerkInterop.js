@@ -97,7 +97,42 @@ window.clerkInterop = (function () {
         // window.Clerk is the auto-initialized instance (not the class).
         // Call load() to complete SDK initialization before using any methods.
         _clerk = window.Clerk;
-        await _clerk.load();
+        await _clerk.load({
+            // Intercept all Clerk-initiated navigations and use replaceState.
+            //
+            // The navigate callback is called for:
+            //  1. Hash-based step navigation during sign-in
+            //     (e.g. /login#/sign-in/factor-two)
+            //  2. The post-sign-in same-origin redirect (e.g. /login)
+            //  3. In Clerk dev instances: a cross-origin "session-cookie sync"
+            //     redirect to https://YOUR_CLERK_DOMAIN/v1/client/sync?...
+            //     which would normally cause a full page reload.
+            //
+            // For same-origin navigations we use replaceState with a trailing '#'
+            // so the URL updates silently without firing a navigation event.
+            // Appending '#' ensures any later window.location.href assignment
+            // to the bare path becomes a hash-removal change (no reload).
+            //
+            // Cross-origin navigations (the dev-mode sync redirect) are suppressed
+            // entirely.  The session JWT is stored in localStorage and is
+            // sufficient for client-side auth state; the sync cookie is only
+            // required for SSR.  Auth state arrives via the addListener callback.
+            navigate: async (to) => {
+                try {
+                    const target = new URL(to, window.location.href);
+                    if (target.origin === window.location.origin) {
+                        // Same-origin: update the URL silently, no reload.
+                        const withHash = to.includes('#') ? to : to + '#';
+                        window.history.replaceState({}, '', withHash);
+                    }
+                    // Cross-origin (dev-mode sync): suppressed — JWT in
+                    // localStorage keeps the session alive without a reload.
+                } catch (err) {
+                    console.warn('[clerkInterop] navigate: could not parse URL:',
+                        err?.message ?? err);
+                }
+            }
+        });
 
         // Signal that Clerk is fully ready.  Tests (and other JS code) can
         // await this flag before calling openSignIn() / getUser() etc.
@@ -116,12 +151,12 @@ window.clerkInterop = (function () {
     async function openSignIn() {
         _assertInitialized();
 
-        // 'virtual' routing keeps all sign-in step navigation in memory: no URL
-        // changes during the multi-step flow and no post-sign-in redirect.  The
-        // modal simply closes when authentication completes, and the addListener
-        // callback delivers the new auth state to .NET without any page navigation.
-        // This keeps the Blazor WASM runtime alive and avoids hash-redirect races.
-        _clerk.openSignIn({ routing: 'virtual' });
+        // Use 'hash' routing so multi-step sign-in navigation stays within the
+        // URL hash (e.g. /login#/sign-in/factor-two).  'virtual' is deprecated in
+        // favour of 'hash' (see https://github.com/clerk/javascript/issues/5055).
+        // The post-sign-in path redirect is suppressed by the navigate() function
+        // provided to _clerk.load() above; auth state is propagated via addListener.
+        _clerk.openSignIn({ routing: 'hash' });
     }
 
     /**
@@ -168,22 +203,18 @@ window.clerkInterop = (function () {
     function onAuthChange(dotNetRef) {
         _assertInitialized();
 
-        // addListener fires on auth state updates.
+        // addListener fires on every auth state change (sign-in, sign-out, session
+        // switch).  With routing:'hash', Clerk's openSignIn() manages session
+        // activation internally — calling setActive() here would duplicate that
+        // work and, in Clerk development instances, can trigger a page reload to
+        // re-establish the dev-mode session cookie.  We therefore only emit to
+        // .NET when Clerk itself reports the session as active.
         const unsubscribe = _clerk.addListener(async ({ user, session }) => {
-            // When a new session exists but has not been made active yet, activate it.
-            // On success, setActive() triggers a second listener invocation where
-            // _clerk.user is populated — return early and let that second call emit.
-            // On failure (e.g. the session was already activated by Clerk internally),
-            // fall through to the emit block below so the user is never lost.
+            // If the session is not yet active, wait for the next invocation.
+            // Clerk will activate the session and fire the listener again with
+            // _clerk.isSignedIn === true once the flow is complete.
             if (!_clerk.isSignedIn && session?.id) {
-                try {
-                    await _clerk.setActive({ session: session.id });
-                    return; // second invocation (with _clerk.isSignedIn === true) will emit
-                } catch (err) {
-                    // setActive failed — session may already be active.
-                    // Fall through to emit whatever state Clerk has now.
-                    console.warn('[clerkInterop] setActive threw:', err?.message ?? err);
-                }
+                return; // transitional — wait for Clerk to activate the session
             }
 
             const resolvedUser = _clerk.user ?? user ?? null;
