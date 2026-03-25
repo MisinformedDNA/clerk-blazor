@@ -98,6 +98,11 @@ window.clerkInterop = (function () {
         // Call load() to complete SDK initialization before using any methods.
         _clerk = window.Clerk;
         await _clerk.load();
+
+        // Signal that Clerk is fully ready.  Tests (and other JS code) can
+        // await this flag before calling openSignIn() / getUser() etc.
+        window.__clerkInteropReady = true;
+
         return true;
     }
 
@@ -111,16 +116,12 @@ window.clerkInterop = (function () {
     async function openSignIn() {
         _assertInitialized();
 
-        // Redirect to a hash-only URL after sign-in so the browser performs a
-        // hash-fragment navigation instead of a full-page reload.  A hash change
-        // keeps the Blazor WASM runtime alive and in memory.
-        const hashRedirectUrl =
-            window.location.pathname + window.location.search + '#';
-
-        _clerk.openSignIn({
-            forceRedirectUrl: hashRedirectUrl,
-            signUpForceRedirectUrl: hashRedirectUrl,
-        });
+        // 'virtual' routing keeps all sign-in step navigation in memory: no URL
+        // changes during the multi-step flow and no post-sign-in redirect.  The
+        // modal simply closes when authentication completes, and the addListener
+        // callback delivers the new auth state to .NET without any page navigation.
+        // This keeps the Blazor WASM runtime alive and avoids hash-redirect races.
+        _clerk.openSignIn({ routing: 'virtual' });
     }
 
     /**
@@ -170,15 +171,19 @@ window.clerkInterop = (function () {
         // addListener fires on auth state updates.
         const unsubscribe = _clerk.addListener(async ({ user, session }) => {
             // When a new session exists but has not been made active yet, activate it.
-            // setActive() triggers a second listener invocation; return early here so
-            // the second call (where _clerk.user is populated) emits to .NET instead.
+            // On success, setActive() triggers a second listener invocation where
+            // _clerk.user is populated — return early and let that second call emit.
+            // On failure (e.g. the session was already activated by Clerk internally),
+            // fall through to the emit block below so the user is never lost.
             if (!_clerk.isSignedIn && session?.id) {
                 try {
                     await _clerk.setActive({ session: session.id });
-                } catch {
-                    // Fall through and emit with the best available state.
+                    return; // second invocation (with _clerk.isSignedIn === true) will emit
+                } catch (err) {
+                    // setActive failed — session may already be active.
+                    // Fall through to emit whatever state Clerk has now.
+                    console.warn('[clerkInterop] setActive threw:', err?.message ?? err);
                 }
-                return;
             }
 
             const resolvedUser = _clerk.user ?? user ?? null;
@@ -194,7 +199,11 @@ window.clerkInterop = (function () {
                 });
             }
 
-            await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
+            try {
+                await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
+            } catch (err) {
+                console.error('[clerkInterop] OnAuthStateChanged failed:', err?.message ?? err);
+            }
         });
 
         return unsubscribe;
