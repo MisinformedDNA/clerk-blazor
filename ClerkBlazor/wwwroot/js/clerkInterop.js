@@ -99,10 +99,6 @@ window.clerkInterop = (function () {
         _clerk = window.Clerk;
         await _clerk.load();
 
-        // Signal that Clerk is fully ready.  Tests (and other JS code) can
-        // await this flag before calling openSignIn() / getUser() etc.
-        window.__clerkInteropReady = true;
-
         return true;
     }
 

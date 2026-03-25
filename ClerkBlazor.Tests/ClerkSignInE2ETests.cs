@@ -76,10 +76,7 @@ public class ClerkSignInE2ETests : PageTest
 
         await Expect(Page.Locator("h1")).ToContainTextAsync("Sign in");
 
-        await Page.WaitForFunctionAsync(
-            "() => window.__clerkInteropReady === true",
-            options: new PageWaitForFunctionOptions { Timeout = 30_000 });
-
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         await Page.EvaluateAsync("() => { window.__wasmAlive = true; }");
 
         // ── Open the Clerk sign-in modal ───────────────────────────────────
