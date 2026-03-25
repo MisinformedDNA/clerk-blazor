@@ -121,7 +121,7 @@ Create your Clerk app at <https://dashboard.clerk.com>.
 
 2. **Set your Publishable Key in `appsettings.Development.json`**
 
-   Open `ClerkBlazor/wwwroot/appsettings.Development.json` and replace the
+   Open `src/Sample/wwwroot/appsettings.Development.json` and replace the
    placeholder:
 
    ```json
@@ -146,7 +146,7 @@ Create your Clerk app at <https://dashboard.clerk.com>.
 3. **Run the app**
 
    ```bash
-   cd ClerkBlazor
+   cd src/Sample
    dotnet run --launch-profile https
    # Open https://localhost:7077 in your browser
    ```
@@ -198,7 +198,7 @@ For CI/CD, patch `appsettings.json` using a GitHub Actions step (see
 - name: Patch Clerk publishable key into appsettings.json
   run: |
     sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
-      ClerkBlazor/wwwroot/appsettings.json
+      src/Sample/wwwroot/appsettings.json
 ```
 
 #### Secret Key (server-side only — never in the browser)
@@ -234,10 +234,10 @@ Add these secrets to your GitHub repository
 - name: Patch Clerk publishable key into appsettings.json
   run: |
     sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
-      ClerkBlazor/wwwroot/appsettings.json
+      src/Sample/wwwroot/appsettings.json
 
 - name: Publish
-  run: dotnet publish ClerkBlazor/ClerkBlazor.csproj -c Release -o publish/
+  run: dotnet publish src/Sample/Sample.csproj -c Release -o publish/
 ```
 
 > ⚠️ The example publishable key `BYl3uCvG5R4RlKBa` is a **local development
@@ -249,42 +249,52 @@ Add these secrets to your GitHub repository
 ### Project structure
 
 ```
-ClerkBlazor/
-├── App.razor                          # Root component; initialises Clerk
-├── RedirectToLogin.razor              # Helper: redirects unauthenticated users
-├── _Imports.razor                     # Global namespace imports
-├── Program.cs                         # Service registration
-├── ClerkBlazor.csproj                 # Project file (includes auth NuGet pkg)
+src/
+├── Clerk.Blazor/                      # Reusable Clerk authentication library
+│   ├── RedirectToLogin.razor          # Helper: redirects unauthenticated users
+│   ├── _Imports.razor                 # Global namespace imports
+│   ├── Clerk.Blazor.csproj            # Razor Class Library project file
+│   │
+│   ├── Services/
+│   │   ├── ClerkUser.cs               # DTO for JS → C# user data
+│   │   ├── ClerkAuthService.cs        # C# wrapper around clerkInterop.js
+│   │   └── ClerkAuthenticationStateProvider.cs  # AuthenticationStateProvider impl
+│   │
+│   └── wwwroot/
+│       └── js/
+│           └── clerkInterop.js        # JS interop module (Clerk SDK wrapper)
 │
-├── Services/
-│   ├── ClerkUser.cs                   # DTO for JS → C# user data
-│   ├── ClerkAuthService.cs            # C# wrapper around clerkInterop.js
-│   └── ClerkAuthenticationStateProvider.cs  # AuthenticationStateProvider impl
-│
-├── Pages/
-│   ├── Login.razor                    # Sign-in page
-│   ├── Logout.razor                   # Sign-out page
-│   └── …                             # Default Blazor pages
-│
-├── Layout/
-│   ├── MainLayout.razor               # Shows current user in top bar
-│   └── NavMenu.razor                  # Login/logout links + Sign in button
-│
-└── wwwroot/
-    ├── appsettings.json               # Default config (Clerk:PublishableKey placeholder)
-    ├── appsettings.Development.json   # Dev overlay — replace placeholder with your key
-    ├── index.html                     # Loads clerkInterop.js
-    └── js/
-        └── clerkInterop.js            # JS interop module (Clerk SDK wrapper)
+└── Sample/                            # Sample Blazor WASM application
+    ├── App.razor                      # Root component; initialises Clerk
+    ├── _Imports.razor                 # Global namespace imports
+    ├── Program.cs                     # Service registration
+    ├── Sample.csproj                  # Blazor WASM project file
+    │
+    ├── Pages/
+    │   ├── Login.razor                # Sign-in page
+    │   ├── Logout.razor               # Sign-out page
+    │   └── …                         # Default Blazor pages
+    │
+    ├── Layout/
+    │   ├── MainLayout.razor           # Shows current user in top bar
+    │   └── NavMenu.razor              # Login/logout links + Sign in button
+    │
+    └── wwwroot/
+        ├── appsettings.json           # Default config (Clerk:PublishableKey placeholder)
+        ├── appsettings.Development.json  # Dev overlay — replace placeholder with your key
+        └── index.html                 # Loads clerkInterop.js from Clerk.Blazor
 
-ClerkBlazor.Tests/
-├── BlazorDevServer.cs                 # Assembly fixture: builds & starts dev server
-├── FakeJSRuntime.cs                   # Mock IJSRuntime for unit tests
-├── ClerkAuthServiceTests.cs           # Unit tests for ClerkAuthService
-├── ClerkAuthStateProviderTests.cs     # Unit tests for ClerkAuthenticationStateProvider
-├── SignInFlowTests.cs                 # Playwright tests for the sign-in flow
-├── HomePageTests.cs                   # Playwright tests for the Home page
-└── LoginPageTests.cs                  # Playwright tests for the Login page
+tests/
+├── Clerk.Blazor.Tests/                # Unit tests for the Clerk.Blazor library
+│   ├── FakeJSRuntime.cs               # Mock IJSRuntime for unit tests
+│   ├── ClerkAuthServiceTests.cs       # Unit tests for ClerkAuthService
+│   └── ClerkAuthStateProviderTests.cs # Unit tests for ClerkAuthenticationStateProvider
+│
+└── Sample.Tests/                      # Tests for the Sample application
+    ├── BlazorDevServer.cs             # Assembly fixture: builds & starts dev server
+    ├── SignInFlowTests.cs             # Playwright tests for the sign-in flow
+    ├── HomePageTests.cs               # Playwright tests for the Home page
+    └── LoginPageTests.cs              # Playwright tests for the Login page
 ```
 
 ---
@@ -295,15 +305,19 @@ The test suite combines **unit tests** (fast, no browser required) and
 **Playwright end-to-end tests** (requires the Blazor dev server to start).
 
 ```bash
-# Run the full suite (unit + Playwright)
-cd ClerkBlazor.Tests
+# Run all unit tests (Clerk.Blazor library)
+cd tests/Clerk.Blazor.Tests
 dotnet test
 
-# Run only unit tests (no server needed)
-dotnet test --filter "FullyQualifiedName~ClerkAuthServiceTests|FullyQualifiedName~ClerkAuthStateProviderTests"
+# Run all tests for the Sample app (unit + Playwright)
+cd tests/Sample.Tests
+dotnet test
 
-# Run only Playwright tests
-dotnet test --filter "FullyQualifiedName~HomePageTests|FullyQualifiedName~LoginPageTests|FullyQualifiedName~SignInFlowTests"
+# Run only Clerk.Blazor unit tests (no server needed)
+dotnet test tests/Clerk.Blazor.Tests --filter "FullyQualifiedName~ClerkAuthServiceTests|FullyQualifiedName~ClerkAuthStateProviderTests"
+
+# Run only Sample Playwright tests
+dotnet test tests/Sample.Tests --filter "FullyQualifiedName~HomePageTests|FullyQualifiedName~LoginPageTests|FullyQualifiedName~SignInFlowTests"
 ```
 
 #### Unit tests
@@ -368,7 +382,7 @@ not covered by this MVP.
 - **Do not commit secrets.** The `.gitignore` already ignores `*.env` files.
   `appsettings.Development.json` ships with a placeholder — replace it locally
   with your real dev key. Use `git update-index --skip-worktree
-  ClerkBlazor/wwwroot/appsettings.Development.json` to prevent accidental
+  src/Sample/wwwroot/appsettings.Development.json` to prevent accidental
   commits once you add a real key.
 - **Rotate test credentials** after sharing them or testing in CI.
 - **Use HTTPS** in all environments. The Blazor dev server defaults to

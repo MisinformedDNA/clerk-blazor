@@ -1,0 +1,56 @@
+@page "/logout"
+
+@inject ClerkAuthService ClerkAuth
+@inject AuthenticationStateProvider AuthProvider
+@inject NavigationManager Nav
+
+<PageTitle>Sign out</PageTitle>
+
+<h1>Sign out</h1>
+
+@if (_signingOut)
+{
+    <p>Signing out…</p>
+}
+else if (_errorMessage is not null)
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+    <button class="btn btn-secondary" @onclick="HandleSignOut">Try again</button>
+}
+else
+{
+    <p>Click the button below to sign out.</p>
+    <button class="btn btn-outline-secondary" @onclick="HandleSignOut">
+        Sign out
+    </button>
+}
+
+@code {
+    private bool _signingOut;
+    private string? _errorMessage;
+
+    private async Task HandleSignOut()
+    {
+        _signingOut = true;
+        _errorMessage = null;
+
+        try
+        {
+            await ClerkAuth.SignOutAsync();
+
+            // Immediately notify subscribers that the user is anonymous.
+            if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
+                clerkProvider.NotifySignOut();
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Sign-out failed: {ex.Message}";
+        }
+        finally
+        {
+            _signingOut = false;
+        }
+    }
+}

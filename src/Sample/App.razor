@@ -1,0 +1,68 @@
+@using Clerk.Blazor.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.Configuration
+
+@inject ClerkAuthService ClerkAuth
+@inject ClerkAuthenticationStateProvider ClerkAuthStateProvider
+@inject IConfiguration Configuration
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    @* Redirect only after Clerk has initialized; otherwise we can
+                       incorrectly bounce already-signed-in users during first render. *@
+                    @if (!ClerkAuth.IsInitialized)
+                    {
+                        <p>Checking authentication…</p>
+                    }
+                    else
+                    {
+                        <RedirectToLogin />
+                    }
+                </NotAuthorized>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+    </Router>
+</CascadingAuthenticationState>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Read the publishable key from appsettings.json / appsettings.Development.json.
+        // Override per environment by editing the appropriate file in wwwroot/.
+        // For CI/CD, substitute the value at build time from the CLERK_PUBLISHABLE_KEY
+        // GitHub Secret — see README.md for a sample workflow.
+        var publishableKey = Configuration["Clerk:PublishableKey"];
+
+        if (string.IsNullOrWhiteSpace(publishableKey) ||
+            publishableKey == "YOUR_CLERK_PUBLISHABLE_KEY")
+        {
+            Console.WriteLine(
+                "[Clerk] Publishable key is not configured. " +
+                "Set Clerk:PublishableKey in wwwroot/appsettings.json " +
+                "(or wwwroot/appsettings.Development.json for local dev). " +
+                "See README.md for instructions.");
+            return;
+        }
+
+        try
+        {
+            await ClerkAuth.InitializeAsync(publishableKey);
+
+            // Register the JS listener so auth state updates automatically.
+            await ClerkAuthStateProvider.RegisterListenerAsync();
+
+            // Force an initial state refresh so the UI reflects the current session.
+            await ClerkAuthStateProvider.ForceRefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Clerk] Initialisation failed: {ex.Message}");
+        }
+    }
+}
