@@ -1,11 +1,56 @@
+@page "/redirect-to-login"
+@using ClerkBlazor.Services
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject ClerkAuthService ClerkAuth
+@inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager Nav
 
 @code {
-    protected override void OnInitialized()
+    private bool _signInAttempted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Redirect to the login page, preserving the current URL as a return
-        // path so the user is sent back after a successful sign-in.
-        var returnUrl = Uri.EscapeDataString(Nav.Uri);
-        Nav.NavigateTo($"/login?returnUrl={returnUrl}", forceLoad: false);
+        if (!firstRender || _signInAttempted)
+            return;
+
+        _signInAttempted = true;
+
+        try
+        {
+            await ClerkAuth.SignInAsync();
+
+            if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
+                await clerkProvider.ForceRefreshAsync();
+
+            // var user = await WaitForSignedInUserAsync();
+            // if (user is null)
+            //     Nav.NavigateTo("/");
+        }
+        catch
+        {
+            //Nav.NavigateTo("/");
+        }
+    }
+
+    private async Task<ClerkUser?> WaitForSignedInUserAsync()
+    {
+        for (var i = 0; i < 20; i++)
+        {
+            var user = await ClerkAuth.GetUserAsync();
+            if (user is not null)
+                return user;
+
+            var authState = await AuthProvider.GetAuthenticationStateAsync();
+            if (authState.User.Identity?.IsAuthenticated == true)
+            {
+                await Task.Delay(50);
+                return await ClerkAuth.GetUserAsync();
+            }
+
+            await Task.Delay(100);
+        }
+
+        return null;
     }
 }

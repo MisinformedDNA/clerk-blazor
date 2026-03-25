@@ -103,17 +103,25 @@ window.clerkInterop = (function () {
 
     /**
      * Open the Clerk sign-in modal (hosted UI).
-     * Resolves after the user dismisses the modal, whether or not they
-     * completed sign-in.  Call getUser() afterwards to check auth state.
+     * Note: openSignIn() opens UI and returns immediately.
      *
      * @returns {Promise<void>}
      */
     async function openSignIn() {
         _assertInitialized();
-        // openSignIn() shows the hosted sign-in component inside the page.
-        // You can pass appearance/redirect options as the first argument;
-        // see https://clerk.com/docs/references/javascript/clerk/clerk#open-sign-in
-        await _clerk.openSignIn();
+
+        // Use documented SignInProps only.
+        // Keep redirect on the current document by targeting a hash URL.
+        const sameDocumentRedirectUrl =
+            window.location.pathname + window.location.search + '#auth-complete';
+
+        _clerk.openSignIn({
+            routing: 'hash',
+            fallbackRedirectUrl: sameDocumentRedirectUrl,
+            forceRedirectUrl: sameDocumentRedirectUrl,
+            signUpFallbackRedirectUrl: sameDocumentRedirectUrl,
+            signUpForceRedirectUrl: sameDocumentRedirectUrl
+        });
     }
 
     /**
@@ -160,20 +168,40 @@ window.clerkInterop = (function () {
     function onAuthChange(dotNetRef) {
         _assertInitialized();
 
-        // addListener fires on every auth state update (sign-in, sign-out, token refresh).
-        // https://clerk.com/docs/references/javascript/clerk/clerk#add-listener
-        const unsubscribe = _clerk.addListener(async ({ user }) => {
+        // addListener fires on auth state updates.
+        const unsubscribe = _clerk.addListener(async ({ user, session }) => {
+            // In some sign-in flows, a session exists before Clerk marks it
+            // active in-memory. Ensure it is activated so `isSignedIn`/`user`
+            // update without a full page refresh.
+            if (!_clerk.isSignedIn && session?.id) {
+                try {
+                    await _clerk.setActive({ session: session.id });
+                } catch {
+                    // Fall through and continue with the best available state.
+                }
+            }
+
+            // Re-hydrate Clerk state so `_clerk.user` is current before emitting
+            // to .NET (avoids requiring a manual page refresh).
+            await _clerk.load();
+
+            const resolvedUser = _clerk.user ?? user ?? null;
+
             let userJson = null;
-            if (user) {
+            if (resolvedUser) {
                 userJson = JSON.stringify({
-                    id: user.id,
-                    email: user.primaryEmailAddress?.emailAddress ?? null,
-                    firstName: user.firstName ?? null,
-                    lastName: user.lastName ?? null,
-                    imageUrl: user.imageUrl ?? null
+                    id: resolvedUser.id,
+                    email: resolvedUser.primaryEmailAddress?.emailAddress ?? null,
+                    firstName: resolvedUser.firstName ?? null,
+                    lastName: resolvedUser.lastName ?? null,
+                    imageUrl: resolvedUser.imageUrl ?? null
                 });
             }
-            // Invoke the C# method – must be marked [JSInvokable] in C#.
+
+            if (window.location.hash === '#auth-complete') {
+                window.history.replaceState({}, '', window.location.pathname + window.location.search);
+            }
+
             await dotNetRef.invokeMethodAsync('OnAuthStateChanged', userJson);
         });
 

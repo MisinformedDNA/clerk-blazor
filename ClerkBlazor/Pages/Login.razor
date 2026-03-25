@@ -1,6 +1,7 @@
 @page "/login"
 
 @using ClerkBlazor.Services
+@using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Authorization
 
 @inject ClerkAuthService ClerkAuth
@@ -29,6 +30,9 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
     private bool _signingIn;
     private string? _errorMessage;
 
@@ -47,10 +51,17 @@ else
             if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
                 await clerkProvider.ForceRefreshAsync();
 
-            // Get the updated auth state to decide where to redirect.
+            // Prefer Clerk user state directly, then fall back to auth state.
+            var user = await ClerkAuth.GetUserAsync();
+            if (user is not null)
+            {
+                Nav.NavigateTo(GetPostLoginDestination());
+                return;
+            }
+
             var authState = await AuthProvider.GetAuthenticationStateAsync();
             if (authState.User.Identity?.IsAuthenticated == true)
-                Nav.NavigateTo("/");
+                Nav.NavigateTo(GetPostLoginDestination());
         }
         catch (Exception ex)
         {
@@ -60,5 +71,32 @@ else
         {
             _signingIn = false;
         }
+    }
+
+    private string GetPostLoginDestination()
+    {
+        if (string.IsNullOrWhiteSpace(ReturnUrl))
+            return "/";
+
+        var baseUri = Nav.ToAbsoluteUri(Nav.BaseUri);
+
+        // RedirectToLogin passes an absolute URL. Allow only same-origin values.
+        if (Uri.TryCreate(ReturnUrl, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.Scheme == baseUri.Scheme &&
+                absoluteUri.Host == baseUri.Host &&
+                absoluteUri.Port == baseUri.Port)
+            {
+                return absoluteUri.PathAndQuery + absoluteUri.Fragment;
+            }
+
+            return "/";
+        }
+
+        // Also support relative paths.
+        if (ReturnUrl.StartsWith('/'))
+            return ReturnUrl;
+
+        return $"/{ReturnUrl}";
     }
 }

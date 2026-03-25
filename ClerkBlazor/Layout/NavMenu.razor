@@ -1,4 +1,8 @@
+@using ClerkBlazor.Services
 @using Microsoft.AspNetCore.Components.Authorization
+
+@inject ClerkAuthService ClerkAuth
+@inject AuthenticationStateProvider AuthProvider
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
@@ -26,6 +30,11 @@
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
             </NavLink>
         </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="protected">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Protected
+            </NavLink>
+        </div>
         <AuthorizeView>
             <Authorized>
                 <div class="nav-item px-3">
@@ -36,9 +45,9 @@
             </Authorized>
             <NotAuthorized>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="login">
+                    <button class="nav-link btn btn-link w-100 text-start" @onclick="HandleSignIn">
                         <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Sign in
-                    </NavLink>
+                    </button>
                 </div>
             </NotAuthorized>
         </AuthorizeView>
@@ -53,6 +62,14 @@
     private void ToggleNavMenu()
     {
         collapseNavMenu = !collapseNavMenu;
+    }
+
+    private async Task HandleSignIn()
+    {
+        await ClerkAuth.SignInAsync();
+
+        if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
+            await clerkProvider.ForceRefreshAsync();
     }
 }
 
