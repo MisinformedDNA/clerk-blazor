@@ -58,9 +58,11 @@ public class ClerkSignInE2ETests : PageTest
         if (_networkRequests.Count > 0)
             TestContext.Out.WriteLine("Network requests:\n" + string.Join("\n", _networkRequests));
 
-        // Print ALL console logs to diagnose the listener
-        if (_consoleLogs.Count > 0)
-            TestContext.Out.WriteLine("All console logs:\n" + string.Join("\n", _consoleLogs));
+        var clerkLogs = _consoleLogs
+            .Where(l => l.Contains("[clerkInterop]") || l.StartsWith("[error]") || l.StartsWith("[warning]"))
+            .ToList();
+        if (clerkLogs.Count > 0)
+            TestContext.Out.WriteLine("Relevant logs:\n" + string.Join("\n", clerkLogs));
     }
 
     [Test]

@@ -72,14 +72,15 @@ Clicking **Sign in** from any page:
    the JS runtime remains on the same page.
 3. The user completes sign-in inside the modal.
 4. Clerk fires the `addListener` callback registered via `clerkInterop.onAuthChange()`.
-5. If the new session is not yet active, `setActive()` is called and the listener
-   returns early, awaiting a second callback invocation.
-6. On the second invocation (or directly if the session was already active),
-   `_clerk.user` is populated and its JSON is sent to .NET via
+5. In Clerk's hash-routing flow, after sign-in completes, Clerk fires the listener
+   with `{ user: null/undefined, session: undefined }`. The new session is already
+   present in `_clerk.client.activeSessions` but not yet activated client-side.
+   `setActive()` is called with that session; once it resolves, `_clerk.user` is
+   populated and its JSON is sent to .NET via
    `DotNetObjectReference.invokeMethodAsync('OnAuthStateChanged', userJson)`.
-7. `ClerkAuthenticationStateProvider.OnAuthStateChanged` deserializes the user,
+6. `ClerkAuthenticationStateProvider.OnAuthStateChanged` deserializes the user,
    builds a `ClaimsPrincipal`, and calls `NotifyAuthenticationStateChanged`.
-8. Blazor's `CascadingAuthenticationState` propagates the new state to all
+7. Blazor's `CascadingAuthenticationState` propagates the new state to all
    `<AuthorizeView>` components — the UI updates in-place with no page reload.
 
 **Key implementation detail**: `openSignIn()` uses a hash-fragment redirect URL
@@ -88,11 +89,13 @@ hash-fragment navigation. A hash change does not cause a full-page reload, which
 keeps the Blazor WASM runtime alive and in memory.
 
 > **Bug that was fixed**: An earlier version called `await _clerk.load()` inside
-> the `addListener` callback. This re-initialized the Clerk SDK and cleared the
-> just-activated session, causing `clerk.user` and the emitted `userJson` to
-> always be `null`. The fix removes that call and adds an early `return` after
-> `setActive()` so the second listener invocation — where the user is
-> populated — emits the data to .NET.
+> the `addListener` callback. This is problematic for two reasons: (1) `_clerk.load()`
+> is idempotent after the first call — it does not re-fetch state; (2) calling it
+> inside the listener can trigger re-entrant listener invocations with stale null
+> state, overwriting the authenticated user. The fix instead reads the pending
+> session from `_clerk.client.activeSessions`, calls `setActive()` to activate it,
+> and reads `_clerk.user` directly after `setActive()` resolves — all within the
+> same callback invocation.
 
 ---
 
