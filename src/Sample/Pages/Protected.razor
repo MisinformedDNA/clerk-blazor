@@ -43,7 +43,7 @@ else if (_userId is not null)
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
-            var response = await client.GetFromJsonAsync<MeResponse>("/me");
+            var response = await client.GetFromJsonAsync<MeResponse>("me");
             _userId = response?.UserId;
         }
         catch (Exception ex)
