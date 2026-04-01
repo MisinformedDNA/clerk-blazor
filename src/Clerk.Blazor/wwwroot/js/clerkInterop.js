@@ -164,6 +164,44 @@ window.clerkInterop = (function () {
     }
 
     /**
+     * Mount Clerk's user button into a container element.
+     *
+     * @param {string} containerId DOM id of the target container.
+     * @returns {boolean} true when mounted, false when no signed-in user exists.
+     */
+    function mountUserButton(containerId) {
+        _assertInitialized();
+
+        const container = document.getElementById(containerId);
+        if (!container) {
+            throw new Error('mountUserButton: container not found: ' + containerId);
+        }
+
+        if (!_clerk.user) {
+            container.replaceChildren();
+            return false;
+        }
+
+        _clerk.mountUserButton(container);
+        return true;
+    }
+
+    /**
+     * Unmount Clerk's user button from a container element.
+     *
+     * @param {string} containerId DOM id of the target container.
+     */
+    function unmountUserButton(containerId) {
+        if (!_clerk) return;
+
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        _clerk.unmountUserButton(container);
+        container.replaceChildren();
+    }
+
+    /**
      * Register a .NET callback that fires whenever the Clerk auth state changes.
      * The callback is invoked with the serialised user object (or null on sign-out).
      *
@@ -261,5 +299,13 @@ window.clerkInterop = (function () {
     }
 
     // Public API
-    return { initialize, openSignIn, getUser, signOut, onAuthChange };
+    return {
+        initialize,
+        openSignIn,
+        getUser,
+        signOut,
+        mountUserButton,
+        unmountUserButton,
+        onAuthChange
+    };
 }());

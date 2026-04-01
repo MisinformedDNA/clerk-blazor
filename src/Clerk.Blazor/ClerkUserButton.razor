@@ -1,0 +1,34 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="clerk-user-button" id="@_containerId"></div>
+
+@code {
+    private readonly string _containerId = $"clerk-user-button-{Guid.NewGuid():N}";
+    private bool _mounted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_mounted)
+            return;
+
+        await JS.InvokeVoidAsync("clerkInterop.mountUserButton", _containerId);
+        _mounted = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_mounted)
+            return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("clerkInterop.unmountUserButton", _containerId);
+        }
+        catch (JSDisconnectedException)
+        {
+            // Ignore disconnection during teardown.
+        }
+    }
+}
