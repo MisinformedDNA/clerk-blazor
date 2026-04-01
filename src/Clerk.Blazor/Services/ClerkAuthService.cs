@@ -83,6 +83,16 @@ public sealed class ClerkAuthService
     }
 
     /// <summary>
+    /// Returns the current Clerk session token (JWT) for authenticating API
+    /// requests, or <c>null</c> when no session exists.
+    /// </summary>
+    public async Task<string?> GetTokenAsync()
+    {
+        EnsureInitialized();
+        return await _js.InvokeAsync<string?>("clerkInterop.getToken");
+    }
+
+    /// <summary>
     /// Registers a .NET callback that is invoked whenever the Clerk auth state
     /// changes (sign-in, sign-out, token refresh).
     /// </summary>
