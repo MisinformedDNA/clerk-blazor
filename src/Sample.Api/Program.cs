@@ -15,9 +15,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = builder.Configuration["Clerk:Authority"];
+        // Clerk session tokens don't include an 'aud' claim by default.
+        // To enable audience validation:
+        //   1. In the Clerk dashboard, go to Configure → Sessions → Customize session token
+        //      and add "aud": "your-api-audience" to the JWT claims.
+        //   2. Set Clerk:Audience in configuration to that same value.
+        var audience = builder.Configuration["Clerk:Audience"];
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = false
+            ValidateAudience = !string.IsNullOrEmpty(audience),
+            ValidAudience = audience
         };
     });
 

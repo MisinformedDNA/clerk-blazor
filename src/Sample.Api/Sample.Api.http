@@ -9,3 +9,14 @@ GET {{Sample.Api_HostAddress}}/todos/1
 Accept: application/json
 
 ###
+
+# GET /me requires a valid Clerk session JWT.
+# To obtain a token: sign in via the Sample Blazor app, then run
+#   clerkInterop.getToken()  in the browser DevTools console.
+@token = <paste-token-here>
+
+GET {{Sample.Api_HostAddress}}/me
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
