@@ -187,6 +187,17 @@ window.clerkInterop = (function () {
     }
 
     /**
+     * Get the current Clerk session token (JWT) for authenticating API requests.
+     *
+     * @returns {Promise<string|null>} The JWT string, or null when no session exists.
+     */
+    async function getToken() {
+        _assertInitialized();
+        if (!_clerk.session) return null;
+        return await _clerk.session.getToken();
+    }
+
+    /**
      * Unmount Clerk's user button from a container element.
      *
      * @param {string} containerId DOM id of the target container.
@@ -303,6 +314,7 @@ window.clerkInterop = (function () {
         initialize,
         openSignIn,
         getUser,
+        getToken,
         signOut,
         mountUserButton,
         unmountUserButton,
