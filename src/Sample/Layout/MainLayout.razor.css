@@ -36,6 +36,16 @@ main {
         text-overflow: ellipsis;
     }
 
+    .top-row .auth-actions {
+        align-items: center;
+        display: flex;
+        gap: 1rem;
+    }
+
+    .top-row .auth-actions ::deep a {
+        margin-left: 0;
+    }
+
 @media (max-width: 640.98px) {
     .top-row {
         justify-content: space-between;

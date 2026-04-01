@@ -10,8 +10,11 @@
         <div class="top-row px-4 auth">
             <AuthorizeView>
                 <Authorized>
-                    Hello, <strong>@context.User.Identity?.Name</strong>!
-                    &nbsp;<a href="logout">Sign out</a>
+                    <div class="auth-actions">
+                        Hello, <strong>@context.User.Identity?.Name</strong>!
+                        <ClerkUserButton />
+                        <a href="logout">Sign out</a>
+                    </div>
                 </Authorized>
                 <NotAuthorized>
                     <a href="login">Sign in</a>

@@ -92,6 +92,43 @@ public class ClerkAuthServiceTests
             Is.True);
     }
 
+    // ── GetTokenAsync ────────────────────────────────────────────────────────
+
+    [Test]
+    [Description("GetTokenAsync must throw when Clerk is not initialized.")]
+    public void GetTokenAsync_NotInitialized_Throws()
+        => Assert.ThrowsAsync<InvalidOperationException>(() => _sut.GetTokenAsync());
+
+    [Test]
+    [Description("GetTokenAsync must invoke clerkInterop.getToken and return the token when initialized.")]
+    public async Task GetTokenAsync_WhenInitialized_ReturnsToken()
+    {
+        _js.SetResult("clerkInterop.initialize", true);
+        await _sut.InitializeAsync("pk_test_key");
+
+        _js.SetResult("clerkInterop.getToken", "eyJhbGciOiJSUzI1NiJ9.test");
+
+        var token = await _sut.GetTokenAsync();
+
+        Assert.That(token, Is.EqualTo("eyJhbGciOiJSUzI1NiJ9.test"));
+        Assert.That(
+            _js.Calls.Any(c => c.Identifier == "clerkInterop.getToken"),
+            Is.True);
+    }
+
+    [Test]
+    [Description("GetTokenAsync must return null when JS returns null (no active session).")]
+    public async Task GetTokenAsync_NoSession_ReturnsNull()
+    {
+        _js.SetResult("clerkInterop.initialize", true);
+        await _sut.InitializeAsync("pk_test_key");
+
+        // FakeJSRuntime returns default (null) for unconfigured identifiers.
+        var token = await _sut.GetTokenAsync();
+
+        Assert.That(token, Is.Null);
+    }
+
     // ── GetUserAsync ─────────────────────────────────────────────────────────
 
     [Test]

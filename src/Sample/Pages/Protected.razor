@@ -1,9 +1,60 @@
 ﻿@using Microsoft.AspNetCore.Authorization
+@using System.Net.Http.Json
 @page "/protected"
 @attribute [Authorize]
 
+@inject ClerkAuthService ClerkAuth
+@inject IHttpClientFactory HttpClientFactory
+
 <h3>Protected</h3>
 
-@code {
+<h4>API call to <code>GET /me</code></h4>
 
+@if (_loading)
+{
+    <p>Calling API…</p>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+else if (_userId is not null)
+{
+    <p>The API confirmed your Clerk user ID: <strong>@_userId</strong></p>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _userId;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var token = await ClerkAuth.GetTokenAsync();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                _error = "No session token available. Please sign in again.";
+                return;
+            }
+
+            var client = HttpClientFactory.CreateClient("SampleApi");
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            var response = await client.GetFromJsonAsync<MeResponse>("me");
+            _userId = response?.UserId;
+        }
+        catch (Exception ex)
+        {
+            _error = $"API call failed: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private record MeResponse(string UserId);
 }
