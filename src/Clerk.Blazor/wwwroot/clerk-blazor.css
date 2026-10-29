@@ -1,0 +1,38 @@
+/* Only Blazor-owned triggers and callback status. Clerk UI owns its styles. */
+.cb-trigger {
+    font: inherit;
+    cursor: pointer;
+}
+.cb-trigger--button {
+    color: #202124;
+    background: #fff;
+    border: 1px solid #c7c9ce;
+    border-radius: .375rem;
+    padding: .5rem .875rem;
+    line-height: 1.4;
+}
+.cb-trigger--button:hover { background: #f3f4f6; }
+.cb-trigger--bare { color: inherit; background: none; border: 0; padding: 0; text-align: inherit; }
+.cb-trigger:disabled { opacity: .6; cursor: wait; }
+.cb-trigger:focus-visible { outline: 2px solid #375bd2; outline-offset: 3px; }
+.cb-alert { padding: .75rem; }
+.cb-alert--danger { color: #a4122c; }
+.cb-callback { display: flex; align-items: center; gap: .75rem; }
+.cb-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+.cb-spinner {
+    display: inline-block;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: cb-spin .8s linear infinite;
+}
+@keyframes cb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cb-spinner { animation: none; } }

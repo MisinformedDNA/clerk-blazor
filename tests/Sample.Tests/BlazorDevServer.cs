@@ -40,6 +40,7 @@ public class BlazorDevServer
         var testDir = TestContext.CurrentContext.TestDirectory;
         var repoRoot = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
         var projectPath = Path.Combine(repoRoot, "src", "Sample", "Sample.csproj");
+        var configuration = new DirectoryInfo(testDir).Parent!.Name;
 
         if (!File.Exists(projectPath))
             throw new FileNotFoundException(
@@ -50,7 +51,7 @@ public class BlazorDevServer
         var buildInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"build \"{projectPath}\" -c Debug --nologo -v quiet",
+            Arguments = $"build \"{projectPath}\" -c {configuration} --nologo -v quiet",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -58,11 +59,14 @@ public class BlazorDevServer
         };
         using (var buildProcess = Process.Start(buildInfo)!)
         {
+            var outputTask = buildProcess.StandardOutput.ReadToEndAsync();
+            var errorTask = buildProcess.StandardError.ReadToEndAsync();
             await buildProcess.WaitForExitAsync().ConfigureAwait(false);
+            var output = await outputTask.ConfigureAwait(false);
+            var err = await errorTask.ConfigureAwait(false);
             if (buildProcess.ExitCode != 0)
             {
-                var err = await buildProcess.StandardError.ReadToEndAsync().ConfigureAwait(false);
-                throw new InvalidOperationException($"dotnet build failed (exit {buildProcess.ExitCode}):\n{err}");
+                throw new InvalidOperationException($"dotnet build failed (exit {buildProcess.ExitCode}):\n{output}\n{err}");
             }
         }
 
@@ -91,7 +95,7 @@ public class BlazorDevServer
                 // --no-build because we already built above; this makes startup much faster.
                 Arguments =
                     $"run --project \"{projectPath}\" " +
-                    "--no-hot-reload --no-build --no-launch-profile",
+                    $"--configuration {configuration} --no-hot-reload --no-build --no-launch-profile",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -101,6 +105,7 @@ public class BlazorDevServer
         };
 
         _process.StartInfo.Environment["ASPNETCORE_URLS"] = BaseUrl;
+        _process.StartInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         _process.OutputDataReceived += (_, e) => AppendLog("OUT: ", e.Data);
         _process.ErrorDataReceived += (_, e) => AppendLog("ERR: ", e.Data);
 

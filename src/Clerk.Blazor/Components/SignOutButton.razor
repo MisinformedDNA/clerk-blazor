@@ -1,0 +1,21 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkRenderedComponentBase
+
+@if (ChildContent is not null)
+{
+    <button type="button" class="cb-trigger cb-trigger--bare" @onclick="SignOutAsync" @attributes="AdditionalAttributes">@ChildContent</button>
+}
+else
+{
+    <button type="button" class="cb-trigger cb-trigger--button @Class" disabled="@Busy" @onclick="SignOutAsync" @attributes="AdditionalAttributes">@L.SignOut</button>
+}
+<Clerk.Blazor.Internal.Alert Message="@GlobalError()" />
+
+@code {
+    [Parameter] public string? RedirectUrl { get; set; }
+    /// <summary>Sign out of a single session (multi-session apps). Defaults to all sessions.</summary>
+    [Parameter] public string? SessionId { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private Task SignOutAsync() => RunAsync(() => Clerk.SignOutAsync(SessionId, RedirectUrl));
+}

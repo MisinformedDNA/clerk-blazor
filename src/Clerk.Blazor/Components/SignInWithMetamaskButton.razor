@@ -1,0 +1,19 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkRenderedComponentBase
+
+@if (ChildContent is not null)
+{
+    <button type="button" class="cb-trigger cb-trigger--bare" @onclick="Authenticate" @attributes="AdditionalAttributes">@ChildContent</button>
+}
+else
+{
+    <button type="button" class="cb-trigger cb-trigger--button @Class" disabled="@Busy" @onclick="Authenticate" @attributes="AdditionalAttributes">Sign in with MetaMask</button>
+}
+<Clerk.Blazor.Internal.Alert Message="@GlobalError()" />
+
+@code {
+    [Parameter] public string? RedirectUrl { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private Task Authenticate() => RunAsync(() => Clerk.SignIn.AuthenticateWithWeb3Async("web3_metamask_signature", RedirectUrl ?? Clerk.Options.SignInFallbackRedirectUrl));
+}

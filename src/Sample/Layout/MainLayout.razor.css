@@ -21,17 +21,17 @@ main {
     align-items: center;
 }
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
+    .top-row > a {
         white-space: nowrap;
         margin-left: 1.5rem;
         text-decoration: none;
     }
 
-    .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
+    .top-row > a:hover {
         text-decoration: underline;
     }
 
-    .top-row ::deep a:first-child {
+    .top-row > a:first-child {
         overflow: hidden;
         text-overflow: ellipsis;
     }
@@ -51,7 +51,7 @@ main {
         justify-content: space-between;
     }
 
-    .top-row ::deep a, .top-row ::deep .btn-link {
+    .top-row > a {
         margin-left: 0;
     }
 }
@@ -72,12 +72,6 @@ main {
         position: sticky;
         top: 0;
         z-index: 1;
-    }
-
-    .top-row.auth ::deep a:first-child {
-        flex: 1;
-        text-align: right;
-        width: 0;
     }
 
     .top-row, article {

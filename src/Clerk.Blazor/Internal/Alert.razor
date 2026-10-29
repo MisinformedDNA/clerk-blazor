@@ -1,0 +1,14 @@
+@namespace Clerk.Blazor.Internal
+@if (!string.IsNullOrEmpty(Message))
+{
+    <div class="cb-alert cb-alert--@Kind" role="@(Kind == "danger" ? "alert" : "status")">
+        <span>@Message</span>
+        @ChildContent
+    </div>
+}
+
+@code {
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public string Kind { get; set; } = "danger";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

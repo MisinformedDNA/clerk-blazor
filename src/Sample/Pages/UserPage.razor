@@ -1,0 +1,13 @@
+@page "/user/{*Path}"
+@page "/user"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<PageTitle>Account</PageTitle>
+<h1 class="visually-hidden">Account</h1>
+
+<UserProfile />
+
+@code {
+    [Parameter] public string? Path { get; set; }
+
+}

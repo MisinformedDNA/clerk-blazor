@@ -1,0 +1,9 @@
+@page "/create-organization"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<PageTitle>Create organization</PageTitle>
+<h1 class="visually-hidden">Create organization</h1>
+
+<div class="auth-page">
+    <CreateOrganization Routing="ClerkRouting.Hash" AfterCreateOrganizationUrl="/organization" />
+</div>

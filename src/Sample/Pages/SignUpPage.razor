@@ -1,0 +1,13 @@
+@page "/sign-up/{*Path}"
+@page "/sign-up"
+
+<PageTitle>Sign up</PageTitle>
+<h1 class="visually-hidden">Sign up</h1>
+
+<div class="auth-page">
+    <SignUp />
+</div>
+
+@code {
+    [Parameter] public string? Path { get; set; }
+}
