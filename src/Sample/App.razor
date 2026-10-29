@@ -11,7 +11,7 @@
                 <NotAuthorized>
                     <ClerkLoaded>
                         <div class="auth-page">
-                            <SignIn Routing="ClerkRouting.Hash" FallbackRedirectUrl="@Navigation.Uri" />
+                            <SignIn Routing="ClerkRouting.Hash" FallbackRedirectUrl="@Navigation.Uri.Split('#')[0]" />
                         </div>
                     </ClerkLoaded>
                     <ClerkLoading>

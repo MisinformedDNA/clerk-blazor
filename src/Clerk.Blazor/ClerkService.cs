@@ -191,7 +191,7 @@ public sealed class ClerkService : IAsyncDisposable
     [JSInvokable]
     public Task Navigate(string to, bool replace)
     {
-        NavigateTo(to, replace);
+        NavigateTo(_nav.ToAbsoluteUri(to).AbsoluteUri, replace);
         return Task.CompletedTask;
     }
 
@@ -336,9 +336,15 @@ public sealed class ClerkService : IAsyncDisposable
             ("transferable", options.Transferable ? null : false)));
     }
 
-    /// <summary>Completes an email-link verification opened in this tab.</summary>
+    /// <summary>
+    /// Completes an email-link verification opened in this tab. <paramref name="redirectUrl"/>
+    /// is the continuation route (second factor by default), while <paramref name="redirectUrlComplete"/>
+    /// is the destination after session activation.
+    /// </summary>
     public async Task HandleEmailLinkVerificationAsync(string? redirectUrl = null, string? redirectUrlComplete = null)
     {
+        redirectUrl ??= $"{_options.SignInUrl.TrimEnd('/')}/factor-two";
+        redirectUrlComplete ??= _options.SignInForceRedirectUrl ?? _options.SignInFallbackRedirectUrl;
         await RunAsync("handleEmailLinkVerification", ClerkArgs.Of(("redirectUrl", redirectUrl), ("redirectUrlComplete", redirectUrlComplete)));
     }
 

@@ -45,6 +45,27 @@ public class ClerkUiTests : ClerkPageTest
     }
 
     [Test]
+    public async Task InlineSignIn_HashStepsDoNotRemountOrChangeRedirect()
+    {
+        await GotoAsync("protected?tab=account");
+        await Expect(Page.Locator(".cl-signIn-root")).ToBeVisibleAsync();
+        await Page.Locator("input[name='identifier']").FillAsync("in-progress@example.com");
+        var initial = await Page.EvaluateAsync<string>("() => window.__fakeClerk.lastProps.SignIn.fallbackRedirectUrl");
+        await Page.EvaluateAsync("() => { window.__fakeClerk.calls.length = 0; location.hash = '/factor-one'; }");
+        await Expect(Page).ToHaveURLAsync(new System.Text.RegularExpressions.Regex(@"#/factor-one$"));
+        await Page.EvaluateAsync("""
+            async () => {
+              await window.__fakeClerk.loadOptions.routerReplace(location.pathname + location.search + location.hash);
+            }
+            """);
+        await Expect(Page.Locator("input[name='identifier']")).ToHaveValueAsync("in-progress@example.com");
+        Assert.That(await Page.EvaluateAsync<string>("() => window.__fakeClerk.lastProps.SignIn.fallbackRedirectUrl"), Is.EqualTo(initial));
+        Assert.That(initial, Does.EndWith("/protected?tab=account"));
+        Assert.That(await Page.EvaluateAsync<bool>("() => window.__fakeClerk.calls.includes('unmountSignIn')"), Is.False);
+        AssertNoConsoleErrors();
+    }
+
+    [Test]
     public async Task Navigation_UnmountsOldContainer()
     {
         await GotoAsync("sign-in");

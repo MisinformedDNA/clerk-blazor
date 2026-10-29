@@ -72,6 +72,8 @@ Alternatively, `<SignIn Routing="ClerkRouting.Hash" />` uses the URL fragment fo
 
 The sample uses a modal in the navigation and inline sign-in on unauthorized pages. Its sign-in/up routes are also available for callbacks and direct links.
 
+For email-link callbacks, use `<AuthenticateWithRedirectCallback EmailLink="true" />`. Completion uses the sign-in force redirect, then the fallback redirect; an unfinished sign-in continues at `SecondFactorUrl` (default: `/sign-in/factor-two`). For sign-up email links, also set `EmailLinkSignUp="true"` to use sign-up redirect settings and `ContinueSignUpUrl` (default: `/sign-up/continue`). These continuation destinations are distinct from the destination after session activation.
+
 ## Components
 
 | Area | Components |

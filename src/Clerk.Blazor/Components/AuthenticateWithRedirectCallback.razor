@@ -28,12 +28,14 @@
     [Parameter] public bool Transferable { get; set; } = true;
     /// <summary>Handle an email-link verification instead of an OAuth callback.</summary>
     [Parameter] public bool EmailLink { get; set; }
+    /// <summary>Use sign-up completion and continuation routes for an email-link verification.</summary>
+    [Parameter] public bool EmailLinkSignUp { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         await RunAsync(() => EmailLink
-            ? Clerk.HandleEmailLinkVerificationAsync(SignInFallbackRedirectUrl, SignInForceRedirectUrl)
+            ? CompleteEmailLinkAsync()
             : Clerk.HandleRedirectCallbackAsync(new RedirectCallbackOptions
             {
                 SignInUrl = SignInUrl, SignUpUrl = SignUpUrl,
@@ -43,4 +45,14 @@
                 Transferable = Transferable,
             }));
     }
+
+    private Task CompleteEmailLinkAsync() => Clerk.HandleEmailLinkVerificationAsync(
+        redirectUrl: EmailLinkSignUp
+            ? ContinueSignUpUrl ?? $"{(SignUpUrl ?? Clerk.Options.SignUpUrl).TrimEnd('/')}/continue"
+            : SecondFactorUrl ?? $"{(SignInUrl ?? Clerk.Options.SignInUrl).TrimEnd('/')}/factor-two",
+        redirectUrlComplete: EmailLinkSignUp
+            ? SignUpForceRedirectUrl ?? Clerk.Options.SignUpForceRedirectUrl
+                ?? SignUpFallbackRedirectUrl ?? Clerk.Options.SignUpFallbackRedirectUrl
+            : SignInForceRedirectUrl ?? Clerk.Options.SignInForceRedirectUrl
+                ?? SignInFallbackRedirectUrl ?? Clerk.Options.SignInFallbackRedirectUrl);
 }

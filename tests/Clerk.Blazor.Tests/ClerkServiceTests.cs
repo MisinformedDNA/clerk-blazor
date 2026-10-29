@@ -132,6 +132,23 @@ public class ClerkServiceTests
     }
 
     [Test]
+    public async Task ClerkRouter_PreservesOriginRelativeSubpath_WhileConfiguredRoutesRemainAppRelative()
+    {
+        var nav = new FakeNavigationManager("https://app.example.com/portal/");
+        var clerk = TestClerk.Create(o => o.UserProfileUrl = "/user", nav: nav);
+        await clerk.Navigate("/portal/sign-in/factor-one?x=1#step", replace: true);
+        await clerk.Navigate("factor-two", replace: false);
+        clerk.RedirectToUserProfile();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(nav.Navigations[0], Is.EqualTo(("https://app.example.com/portal/sign-in/factor-one?x=1#step", false, true)));
+            Assert.That(nav.Navigations[1].Uri, Is.EqualTo("https://app.example.com/portal/factor-two"));
+            Assert.That(nav.Navigations[2].Uri, Is.EqualTo("./user"));
+        });
+    }
+
+    [Test]
     public async Task WithReverificationAsync_PromptsAndRetriesOnce()
     {
         var clerk = TestClerk.Create();
