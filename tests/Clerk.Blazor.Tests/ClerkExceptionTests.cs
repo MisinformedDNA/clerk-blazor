@@ -3,6 +3,14 @@ namespace Clerk.Blazor.Tests;
 public class ClerkExceptionTests
 {
     [Test]
+    public void NormalizedField_FallsBackToMatchingMessage()
+    {
+        var ex = new ClerkException("form_errors", "Request failed",
+            [new("invalid", "Invalid email", null, "email_address")]);
+        Assert.That(ex.FieldError("emailAddress"), Is.EqualTo("Invalid email"));
+    }
+
+    [Test]
     public void InteropError_MapsToTypedExceptions()
     {
         Assert.Multiple(() =>

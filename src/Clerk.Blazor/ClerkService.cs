@@ -273,9 +273,9 @@ public sealed class ClerkService : IAsyncDisposable
                 ? await ReverificationHandler(needed)
                 : (await RunAsync("reverify", needed.Level switch
                 {
-                    ReverificationLevel.FirstFactor => "firstFactor",
-                    ReverificationLevel.MultiFactor => "multiFactor",
-                    _ => "secondFactor",
+                    ReverificationLevel.FirstFactor => "first_factor",
+                    ReverificationLevel.MultiFactor => "multi_factor",
+                    _ => "second_factor",
                 })).GetBoolean();
             if (!verified) throw new ClerkException("reverification_cancelled", "Verification was cancelled.");
             return await operation();
@@ -382,6 +382,7 @@ public sealed class ClerkService : IAsyncDisposable
     public string ResolveRedirect(string? redirectUrl, string fallback)
     {
         if (string.IsNullOrWhiteSpace(redirectUrl)) return fallback;
+        if (redirectUrl.Contains('\\') || redirectUrl.Any(char.IsControl)) return fallback;
         if (redirectUrl.StartsWith('/') && !redirectUrl.StartsWith("//", StringComparison.Ordinal)) return redirectUrl;
         if (!Uri.TryCreate(redirectUrl, UriKind.Absolute, out var target)) return fallback;
         var origin = new Uri(_nav.BaseUri);

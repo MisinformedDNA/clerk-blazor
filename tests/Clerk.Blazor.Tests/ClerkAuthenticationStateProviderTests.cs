@@ -37,6 +37,27 @@ public class ClerkAuthenticationStateProviderTests
     }
 
     [Test]
+    public async Task ClaimChanges_NotifyWithoutIdentityOrTimestampChanges()
+    {
+        var clerk = TestClerk.Create();
+        using var provider = new ClerkAuthenticationStateProvider(clerk);
+        var notifications = new List<Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>>();
+        provider.AuthenticationStateChanged += notifications.Add;
+        clerk.OnStateChanged(TestClerk.SignedInSnapshot);
+        clerk.OnStateChanged(TestClerk.SignedInSnapshot.Replace("\"seq\": 1", "\"seq\": 2")
+            .Replace("org:sys_billing:manage", "org:reports:read"));
+        clerk.OnStateChanged(TestClerk.SignedInSnapshot.Replace("\"seq\": 1", "\"seq\": 3")
+            .Replace("\"slug\": \"engines\"", "\"slug\": \"new-slug\""));
+        clerk.OnStateChanged(TestClerk.SignedInSnapshot.Replace("\"seq\": 1", "\"seq\": 4")
+            .Replace("Ada", "Grace"));
+
+        Assert.That(notifications, Has.Count.EqualTo(4));
+        Assert.That((await notifications[1]).User.FindFirst("org_permission")?.Value, Is.EqualTo("org:reports:read"));
+        Assert.That((await notifications[2]).User.FindFirst("org_slug")?.Value, Is.EqualTo("new-slug"));
+        Assert.That((await notifications[3]).User.Identity?.Name, Is.EqualTo("Grace Lovelace"));
+    }
+
+    [Test]
     public void StateChanges_NotifyOnlyWhenIdentityChanges()
     {
         var clerk = TestClerk.Create();

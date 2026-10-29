@@ -27,10 +27,14 @@
     {
         var pendingAsOut = TreatPendingAsSignedOut ?? Clerk.Options.TreatPendingAsSignedOut;
         var session = State.Session;
-        var signedIn = session is not null && (!session.IsPending || !pendingAsOut);
+        var signedIn = session is not null && (session.Status == "active" || (session.IsPending && !pendingAsOut));
         if (When == ShowWhen.SignedOut) return !signedIn;
         if (!signedIn) return false;
-        var auth = Auth;
+        var auth = ClerkState.From(new ClerkSnapshot
+        {
+            Loaded = State.IsLoaded, Session = session, User = State.User,
+            Organization = State.Organization, Membership = State.Membership,
+        }, pendingAsOut).Auth;
         if (Role is not null || Permission is not null || Feature is not null || Plan is not null || Reverification is not null)
         {
             var check = new ClerkCheck

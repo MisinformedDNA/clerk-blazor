@@ -32,7 +32,6 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        await Clerk.LoadAsync();
         await RunAsync(() => EmailLink
             ? Clerk.HandleEmailLinkVerificationAsync(SignInFallbackRedirectUrl, SignInForceRedirectUrl)
             : Clerk.HandleRedirectCallbackAsync(new RedirectCallbackOptions

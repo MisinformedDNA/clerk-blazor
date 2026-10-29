@@ -157,7 +157,7 @@ public class ClerkUiTests : ClerkPageTest
         Assert.That(await Page.EvaluateAsync<bool>("""
             async () => {
               const b = await import('./_content/Clerk.Blazor/js/clerk-blazor.js');
-              const verified = b.reverify('secondFactor');
+              const verified = b.reverify('second_factor');
               await b.openUi('SignIn', {});
               return (await verified).value;
             }

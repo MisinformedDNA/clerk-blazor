@@ -2,6 +2,7 @@
 @page "/tasks/reset-password"
 @page "/tasks/setup-mfa"
 @page "/tasks"
+@inherits ClerkComponentBase
 
 <PageTitle>Finish signing in</PageTitle>
 <h1 class="visually-hidden">Finish signing in</h1>
@@ -15,7 +16,3 @@
         default: <ClerkLoaded><p>Nothing left to do. <a href="">Continue</a></p></ClerkLoaded>; break;
     }
 </div>
-
-@code {
-    [Inject] private ClerkService Clerk { get; set; } = default!;
-}

@@ -80,12 +80,12 @@ public abstract class ClerkUiItem : ComponentBase, IDisposable
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public EventCallback OnClick { get; set; }
     private ClerkUiRegistry? _registered;
-    private (string, string?, string?, string?, RenderFragment?, RenderFragment?, EventCallback)? _previous;
+    private (string, string?, string?, string?, bool, bool, bool)? _previous;
 
     protected override void OnParametersSet()
     {
         if (Registry is null) throw new InvalidOperationException($"{GetType().Name} must be inside a Clerk profile or menu component.");
-        var current = (Label, Url, Href, Open, Icon, ChildContent, OnClick);
+        var current = (Label, Url, Href, Open, Icon is not null, ChildContent is not null, OnClick.HasDelegate);
         if (_registered == Registry && _previous.Equals(current)) return;
         _registered?.Items.Remove(Id);
         _registered = Registry;

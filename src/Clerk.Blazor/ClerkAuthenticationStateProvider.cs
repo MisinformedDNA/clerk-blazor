@@ -14,7 +14,7 @@ public sealed class ClerkAuthenticationStateProvider : AuthenticationStateProvid
     private static readonly AuthenticationState Anonymous = new(new ClaimsPrincipal(new ClaimsIdentity()));
 
     private readonly ClerkService _clerk;
-    private string? _lastKey;
+    private (string Type, string Value)[]? _lastClaims;
 
     public ClerkAuthenticationStateProvider(ClerkService clerk)
     {
@@ -26,10 +26,11 @@ public sealed class ClerkAuthenticationStateProvider : AuthenticationStateProvid
 
     private void OnStateChanged(ClerkState state)
     {
-        var key = $"{state.Auth.UserId}|{state.Auth.SessionId}|{state.Auth.OrgId}|{state.Auth.OrgRole}|{state.User?.UpdatedAt}";
-        if (key == _lastKey) return;
-        _lastKey = key;
-        NotifyAuthenticationStateChanged(Task.FromResult(Build(state)));
+        var projected = Build(state);
+        var claims = projected.User.Claims.Select(c => (c.Type, c.Value)).ToArray();
+        if (_lastClaims is not null && _lastClaims.SequenceEqual(claims)) return;
+        _lastClaims = claims;
+        NotifyAuthenticationStateChanged(Task.FromResult(projected));
     }
 
     /// <summary>Builds a principal from Clerk state. Pending sessions are anonymous when <see cref="ClerkOptions.TreatPendingAsSignedOut"/> is set.</summary>

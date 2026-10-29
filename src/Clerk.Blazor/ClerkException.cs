@@ -31,11 +31,12 @@ public class ClerkException : Exception
     public string? TraceId { get; }
 
     /// <summary>Returns the first error message for a form field (e.g. <c>password</c>, <c>identifier</c>).</summary>
-    public string? FieldError(string paramName) =>
-        Errors.FirstOrDefault(e => string.Equals(e.ParamName, paramName, StringComparison.OrdinalIgnoreCase)
-                                   || string.Equals(e.ParamName?.Replace("_", ""), paramName.Replace("_", ""), StringComparison.OrdinalIgnoreCase))
-              ?.LongMessage
-        ?? Errors.FirstOrDefault(e => string.Equals(e.ParamName, paramName, StringComparison.OrdinalIgnoreCase))?.Message;
+    public string? FieldError(string paramName)
+    {
+        var error = Errors.FirstOrDefault(e => string.Equals(e.ParamName, paramName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(e.ParamName?.Replace("_", ""), paramName.Replace("_", ""), StringComparison.OrdinalIgnoreCase));
+        return error?.LongMessage ?? error?.Message;
+    }
 
     /// <summary>The message for errors that are not tied to a field.</summary>
     public string GlobalMessage =>
