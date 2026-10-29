@@ -1,7 +1,7 @@
 @namespace Clerk.Blazor.Components
 @inherits ClerkComponentBase
 
-@* Loads ClerkJS (headless) and cascades ClerkState to descendants. Equivalent to <ClerkProvider>. *@
+@* Loads ClerkJS and cascades ClerkState to descendants. *@
 <CascadingValue Value="State" IsFixed="false">
     @if (State.Status == ClerkStatus.Error && FailedContent is not null)
     {
@@ -12,7 +12,6 @@
         @ChildContent
     }
 </CascadingValue>
-<Clerk.Blazor.Internal.ReverificationDialog />
 
 @code {
     [Parameter] public RenderFragment? ChildContent { get; set; }

@@ -11,6 +11,8 @@ public enum ClerkRouting
 {
     /// <summary>Steps are reflected in the URL path (e.g. <c>/sign-in/factor-one</c>). Requires a catch-all route.</summary>
     Path,
-    /// <summary>Steps are held in component state only.</summary>
-    Virtual,
+    /// <summary>Clerk tracks steps in the URL fragment. Does not require catch-all app routes.</summary>
+    Hash,
+    /// <summary>Compatibility alias. Official embedded Clerk UI uses hash routing instead of native virtual routing.</summary>
+    Virtual = Hash,
 }

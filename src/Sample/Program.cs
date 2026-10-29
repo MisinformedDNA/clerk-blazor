@@ -17,7 +17,7 @@ if (string.IsNullOrWhiteSpace(apiBaseUrl) || !Uri.TryCreate(apiBaseUrl, UriKind.
 
 builder.Services.AddHttpClient("SampleApi", client => client.BaseAddress = apiBaseUri);
 
-// Clerk: loads ClerkJS headless (no React), registers ClerkService, the AuthenticationStateProvider
+// Clerk: loads ClerkJS and official Clerk UI, registers ClerkService, the AuthenticationStateProvider
 // and authorization. Publishable key comes from wwwroot/appsettings*.json (safe to expose).
 builder.Services.AddClerk(options =>
 {

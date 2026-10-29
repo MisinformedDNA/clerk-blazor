@@ -2,18 +2,18 @@ using Microsoft.Playwright;
 
 namespace Sample.Tests;
 
-/// <summary>The native SignIn component renders and the app reacts to Clerk session changes without reloading.</summary>
+/// <summary>Clerk UI mounting and reactive auth state, using a contract fake (not a visual test).</summary>
 [Parallelizable(ParallelScope.Self)]
 [TestFixture]
 public class SignInFlowTests : ClerkPageTest
 {
     [Test]
-    public async Task SignInPage_RendersNativeForm()
+    public async Task SignInPage_MountsClerkForm()
     {
         await GotoAsync("sign-in");
         await Expect(Page).ToHaveTitleAsync("Sign in");
 
-        var card = Page.Locator(".cb-sign-in");
+        var card = Page.Locator(".cl-signIn-root");
         await Expect(card).ToBeVisibleAsync();
         await Expect(card.Locator("input[name='identifier']")).ToBeVisibleAsync();
         await Expect(card.GetByRole(AriaRole.Button, new() { Name = "Continue" })).ToBeEnabledAsync();
@@ -22,13 +22,15 @@ public class SignInFlowTests : ClerkPageTest
     }
 
     [Test]
-    public async Task SignInPage_DoesNotUseClerkHostedUi()
+    public async Task SignInPage_PassesRoutingPropsToClerkUi()
     {
         await GotoAsync("sign-in");
-        await Expect(Page.Locator(".cb-sign-in")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".cl-signIn-root")).ToBeVisibleAsync();
 
         var calls = await Page.EvaluateAsync<string[]>("() => window.__fakeClerk.calls");
-        Assert.That(calls, Has.None.StartsWith("mount").And.None.StartsWith("open"));
+        Assert.That(calls, Does.Contain("mountSignIn"));
+        Assert.That(await Page.EvaluateAsync<string>("() => window.__fakeClerk.lastProps.SignIn.routing"), Is.EqualTo("path"));
+        Assert.That(await Page.EvaluateAsync<string>("() => window.__fakeClerk.lastProps.SignIn.path"), Is.EqualTo("/sign-in"));
     }
 
     [Test]
@@ -41,7 +43,7 @@ public class SignInFlowTests : ClerkPageTest
         await Page.EvaluateAsync("() => window.__fakeClerk.signIn()");
 
         await Expect(Page.Locator("nav")).ToContainTextAsync("Sign out");
-        await Expect(Page.Locator(".cb-user-button")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".cl-userButtonTrigger")).ToBeVisibleAsync();
         Assert.That(await Page.EvaluateAsync<bool>("() => window.__wasmAlive === true"), Is.True, "The page must not reload after sign-in.");
         AssertNoConsoleErrors();
     }
@@ -61,13 +63,14 @@ public class SignInFlowTests : ClerkPageTest
     }
 
     [Test]
-    public async Task NavSignIn_OpensNativeModal()
+    public async Task NavSignIn_OpensClerkModalWithoutBlazorDialog()
     {
         await GotoAsync();
         await Page.Locator("nav").GetByRole(AriaRole.Button, new() { Name = "Sign in" }).ClickAsync();
 
-        var dialog = Page.Locator("dialog[open]");
-        await Expect(dialog.Locator(".cb-sign-in")).ToBeVisibleAsync();
+        var dialog = Page.Locator("[data-fake-clerk-modal='SignIn']");
+        await Expect(dialog).ToBeVisibleAsync();
+        await Expect(Page.Locator("dialog")).ToHaveCountAsync(0);
         await Expect(Page).ToHaveURLAsync(new Regex("/$"));
 
         await Page.Keyboard.PressAsync("Escape");
@@ -79,7 +82,7 @@ public class SignInFlowTests : ClerkPageTest
     public async Task ProtectedPage_ShowsInlineSignIn_WhenSignedOut()
     {
         await GotoAsync("protected");
-        await Expect(Page.Locator(".cb-sign-in")).ToBeVisibleAsync();
+        await Expect(Page.Locator(".cl-signIn-root")).ToBeVisibleAsync();
         await Expect(Page).ToHaveURLAsync(new Regex("/protected$"));
 
         await Page.EvaluateAsync("() => window.__fakeClerk.signIn()");

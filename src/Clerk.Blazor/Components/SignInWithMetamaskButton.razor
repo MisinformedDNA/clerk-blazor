@@ -7,7 +7,7 @@
 }
 else
 {
-    <button type="button" class="@RootClass("cb-btn cb-btn--outline")" disabled="@Busy" @onclick="Authenticate" @attributes="AdditionalAttributes">Sign in with MetaMask</button>
+    <button type="button" class="cb-trigger cb-trigger--button @Class" disabled="@Busy" @onclick="Authenticate" @attributes="AdditionalAttributes">Sign in with MetaMask</button>
 }
 <Clerk.Blazor.Internal.Alert Message="@GlobalError()" />
 

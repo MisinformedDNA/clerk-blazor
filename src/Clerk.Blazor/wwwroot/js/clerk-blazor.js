@@ -1,17 +1,11 @@
-// Clerk.Blazor headless bridge.
-//
-// Loads the pinned, headless ClerkJS browser bundle and exposes a small, generic
-// surface to .NET. ClerkJS only creates its (React-based) UI when `load()` is given
-// a `ui.ClerkUI` constructor; this bridge never loads `@clerk/ui` and never passes
-// that option, and it refuses every mount/open UI method. All UI is rendered by
-// native Razor components.
+// Clerk.Blazor bridge. Clerk owns the DOM inside mounted UI islands; Blazor owns
+// their containers and the C# authentication/state integration.
 
 export const CLERK_JS_VERSION = '6.42.0';
+export const CLERK_UI_VERSION = '1.42.1';
 
-// Methods that would require Clerk's React UI, or lazily download a chunk that
-// embeds React (the Base Account SDK used by Base / Coinbase wallets).
-const FORBIDDEN_METHOD = /^(mount|unmount|open|close)[A-Z]|^__internal_(?!loadStripeJs$)|^authenticateWith(Base|CoinbaseWallet)$/;
-const FORBIDDEN_STRATEGIES = new Set(['web3_base_signature', 'web3_coinbase_wallet_signature']);
+// UI calls go through lifecycle-aware helpers, not the JSON resource API.
+const FORBIDDEN_METHOD = /^(mount|unmount|open|close)[A-Z]|^__internal_(?!loadStripeJs$)/;
 const MAX_HANDLES = 1000;
 
 let clerk = null;
@@ -22,6 +16,25 @@ let disposers = [];
 let loadPromise = null;
 const handles = new Map();
 let nextHandle = 1;
+const uiMounts = new Set();
+const uiComponents = new Set([
+    'SignIn', 'SignUp', 'UserAvatar', 'UserButton', 'UserProfile',
+    'OrganizationProfile', 'CreateOrganization', 'OrganizationSwitcher',
+    'OrganizationList', 'Waitlist', 'PricingTable', 'OAuthConsent', 'APIKeys',
+    'TaskChooseOrganization', 'TaskResetPassword', 'TaskSetupMFA', 'GoogleOneTap',
+]);
+const uiModals = {
+    SignIn: ['openSignIn', 'closeSignIn'],
+    SignUp: ['openSignUp', 'closeSignUp'],
+    UserProfile: ['openUserProfile', 'closeUserProfile'],
+    OrganizationProfile: ['openOrganizationProfile', 'closeOrganizationProfile'],
+    CreateOrganization: ['openCreateOrganization', 'closeCreateOrganization'],
+    Waitlist: ['openWaitlist', 'closeWaitlist'],
+    Checkout: ['__internal_openCheckout', '__internal_closeCheckout'],
+    PlanDetails: ['__internal_openPlanDetails', '__internal_closePlanDetails'],
+    SubscriptionDetails: ['__internal_openSubscriptionDetails', '__internal_closeSubscriptionDetails'],
+    Reverification: ['__internal_openReverification', '__internal_closeReverification'],
+};
 
 // ── Loading ──────────────────────────────────────────────────────────────────
 
@@ -40,21 +53,32 @@ export function scriptUrl(opts) {
     return `${base}/npm/@clerk/clerk-js@${version}/dist/clerk.browser.js`;
 }
 
-function injectScript(src, opts) {
+export function uiScriptUrl(opts) {
+    if (opts.clerkUIUrl) return opts.clerkUIUrl;
+    const base = opts.proxyUrl ? opts.proxyUrl.replace(/\/$/, '') : 'https://' + frontendApiFromKey(opts.publishableKey);
+    return `${base}/npm/@clerk/ui@${opts.clerkUIVersion || CLERK_UI_VERSION}/dist/ui.browser.js`;
+}
+
+function injectScript(src, opts, attribute = 'data-clerk-blazor') {
     return new Promise((resolve, reject) => {
-        const existing = document.querySelector('script[data-clerk-blazor]');
-        if (existing && window.Clerk) { resolve(); return; }
-        const script = existing || document.createElement('script');
-        script.setAttribute('data-clerk-blazor', '');
+        const script = document.createElement('script');
+        script.setAttribute(attribute, '');
         script.setAttribute('data-clerk-publishable-key', opts.publishableKey);
         if (opts.proxyUrl) script.setAttribute('data-clerk-proxy-url', opts.proxyUrl);
         if (opts.domain) script.setAttribute('data-clerk-domain', opts.domain);
         if (opts.nonce) script.nonce = opts.nonce;
         script.crossOrigin = 'anonymous';
         script.async = true;
-        script.addEventListener('load', () => resolve(), { once: true });
-        script.addEventListener('error', () => reject(clerkError('clerkjs_failed_to_load', `Failed to load ClerkJS from ${src}.`)), { once: true });
-        if (!existing) { script.src = src; document.head.appendChild(script); }
+        const timeout = setTimeout(() => fail(), 15000);
+        const fail = () => {
+            clearTimeout(timeout);
+            script.remove();
+            reject(clerkError('script_failed_to_load', `Failed to load Clerk script from ${src}. Check the network and Content Security Policy.`));
+        };
+        script.addEventListener('load', () => { clearTimeout(timeout); resolve(); }, { once: true });
+        script.addEventListener('error', fail, { once: true });
+        script.src = src;
+        document.head.appendChild(script);
     });
 }
 
@@ -68,7 +92,7 @@ function injectStyles(href) {
 }
 
 /**
- * Loads ClerkJS headlessly and wires its listeners to the .NET ClerkService.
+ * Loads ClerkJS and, unless opted out, Clerk UI. Wires listeners to ClerkService.
  * Idempotent: subsequent calls return the in-flight or completed load.
  */
 export function load(opts, dotnetRef) {
@@ -80,7 +104,12 @@ export function load(opts, dotnetRef) {
     dotnet = dotnetRef;
     loadPromise = (async () => {
         injectStyles(options.stylesheetUrl);
-        if (!window.Clerk) await injectScript(scriptUrl(options), options);
+        await Promise.all([
+            window.Clerk ? Promise.resolve() : injectScript(scriptUrl(options), options),
+            options.loadUserInterface === false || window.__internal_ClerkUICtor
+                ? Promise.resolve()
+                : injectScript(uiScriptUrl(options), options, 'data-clerk-ui-script'),
+        ]);
         if (!window.Clerk) throw clerkError('clerkjs_not_initialized', 'ClerkJS did not initialize. Verify the publishable key.');
         clerk = typeof window.Clerk === 'function'
             ? new window.Clerk(options.publishableKey, { proxyUrl: options.proxyUrl, domain: options.domain })
@@ -91,10 +120,13 @@ export function load(opts, dotnetRef) {
             routerPush: (to) => navigate(to, false),
             routerReplace: (to) => navigate(to, true),
         };
-        // Never allow the UI constructor through, whatever the caller supplied.
         delete loadOptions.ui;
         delete loadOptions.clerkUICtor;
         delete loadOptions.clerkUiCtor;
+        if (options.loadUserInterface !== false) {
+            if (!window.__internal_ClerkUICtor) throw clerkError('clerk_ui_not_initialized', 'Clerk UI did not initialize.');
+            loadOptions.ui = { ClerkUI: window.__internal_ClerkUICtor };
+        }
         await clerk.load(loadOptions);
 
         disposers.push(clerk.addListener(() => emit()));
@@ -110,6 +142,11 @@ export function load(opts, dotnetRef) {
 }
 
 export function dispose() {
+    for (const mount of [...uiMounts]) mount.release();
+    if (clerk && options.loadUserInterface !== false) {
+        closeUi();
+        clerk.closeGoogleOneTap?.();
+    }
     for (const d of disposers) { try { typeof d === 'function' && d(); } catch { /* ignore */ } }
     disposers = [];
     handles.clear();
@@ -255,7 +292,7 @@ function environmentSnap(env) {
         signUpMode: us.signUp?.mode ?? 'public', legalConsentEnabled: !!us.signUp?.legal_consent_enabled,
         attributes: Object.fromEntries(attributeNames.map((n) => [n, attribute(attrs[n])])),
         socialProviders: social,
-        web3Strategies: (us.web3FirstFactors || []).filter((s) => !FORBIDDEN_STRATEGIES.has(s)),
+        web3Strategies: us.web3FirstFactors || [],
         enterpriseSsoEnabled: !!us.enterpriseSSO?.enabled,
         singleSessionMode: env.authConfig?.singleSessionMode ?? true,
         passwordMinLength: us.passwordSettings?.min_length ?? 8, passwordMaxLength: us.passwordSettings?.max_length ?? 72,
@@ -337,18 +374,10 @@ function errorPayload(err) {
     };
 }
 
-function guardArgs(args) {
-    for (const a of args) {
-        if (a && typeof a === 'object' && FORBIDDEN_STRATEGIES.has(a.strategy)) {
-            throw clerkError('forbidden_strategy', `The '${a.strategy}' strategy downloads a React-based wallet SDK and is not supported by Clerk.Blazor.`);
-        }
-    }
-}
-
 function resolveTarget(root, path) {
     const parts = path.split('.');
     const name = parts.pop();
-    if (FORBIDDEN_METHOD.test(name)) throw clerkError('forbidden_method', `'${name}' requires Clerk's React UI and is not available in Clerk.Blazor.`);
+    if (FORBIDDEN_METHOD.test(name)) throw clerkError('forbidden_method', `Use the Clerk UI components or OpenUiAsync for '${name}', rather than the resource API.`);
     let target = root;
     for (const p of parts) {
         if (p.startsWith('__') || target == null) throw clerkError('invalid_path', `Cannot resolve '${path}'.`);
@@ -398,7 +427,6 @@ function toPlain(v, depth = 0, seen = new WeakSet(), withHandle = true) {
 async function call(root, path, args) {
     try {
         args = args || [];
-        guardArgs(args);
         const { target, name } = resolveTarget(root, path);
         const member = target[name];
         const result = typeof member === 'function' ? await member.apply(target, args) : member;
@@ -427,6 +455,159 @@ export async function invokeHandle(handle, path, args) {
 }
 
 export function release(handle) { handles.delete(handle); }
+
+// ── Official Clerk UI ──────────────────────────────────────────────────────
+
+function requireUi() {
+    requireClerk();
+    if (options.loadUserInterface === false) {
+        throw clerkError('clerk_ui_disabled', 'Clerk UI is disabled. Enable ClerkOptions.LoadUserInterface to use built-in UI components.');
+    }
+}
+
+function uiProps(props, dotnetRef, isAlive) {
+    const { __events = [], __customItems = [], __profilePropsKey, ...result } = props || {};
+    const dispatch = (name, value) => {
+        if (!isAlive()) return;
+        return dotnetRef.invokeMethodAsync('OnUiEvent', name, value)
+            .catch(error => console.error('[Clerk.Blazor] UI event failed', error));
+    };
+    for (const name of __events) {
+        result[name] = (...args) => dispatch(name, toPlain(args[0]) ?? null);
+    }
+    const pages = [], menu = [];
+    for (const item of __customItems) {
+        const entry = { label: item.label };
+        const attach = (id, mountKey, unmountKey) => {
+            if (!id) return;
+            const element = document.getElementById(id);
+            if (!element) throw clerkError('missing_ui_slot', `Razor content '${id}' was not rendered.`);
+            const home = element.parentNode;
+            entry[mountKey] = (target) => target.appendChild(element);
+            entry[unmountKey] = () => home.appendChild(element);
+        };
+        attach(item.iconId, 'mountIcon', 'unmountIcon');
+        attach(item.contentId, 'mount', 'unmount');
+        if (item.kind === 'page' || item.kind === 'link') {
+            entry.url = item.url;
+            pages.push(entry);
+        } else {
+            if (item.href) entry.href = item.href;
+            if (item.open) entry.open = item.open;
+            if (item.hasClick) entry.onClick = () => dispatch(item.id, null);
+            menu.push(entry);
+        }
+    }
+    if (pages.length) {
+        const target = __profilePropsKey
+            ? (result[__profilePropsKey] = { ...result[__profilePropsKey] })
+            : result;
+        target.customPages = [...(target.customPages || []), ...pages];
+    }
+    if (menu.length) result.customMenuItems = [...(result.customMenuItems || []), ...menu];
+    return result;
+}
+
+/** Mounts only into a Blazor-owned, otherwise empty container. */
+export function mountUi(name, node, props, dotnetRef) {
+    requireUi();
+    if (!uiComponents.has(name)) throw clerkError('invalid_ui_component', `Unsupported Clerk component '${name}'.`);
+    if (!node?.isConnected) throw clerkError('invalid_ui_container', 'The Clerk UI container is no longer attached.');
+    let alive = true;
+    let currentProps = JSON.stringify(props);
+    let oneTap;
+    const mount = () => {
+        const prepared = uiProps(props, dotnetRef, () => alive);
+        if (name === 'GoogleOneTap') oneTap = openOneTap(prepared, node);
+        else clerk['mount' + name](node, prepared);
+    };
+    const unmount = () => {
+        if (name === 'GoogleOneTap') oneTap.release();
+        else clerk['unmount' + name](node);
+    };
+    mount();
+    const handle = {
+        update(nextProps) {
+            if (!alive || currentProps === JSON.stringify(nextProps)) return;
+            unmount();
+            props = nextProps;
+            currentProps = JSON.stringify(props);
+            mount();
+        },
+        release() {
+            if (!alive) return;
+            alive = false;
+            unmount();
+            uiMounts.delete(handle);
+        },
+    };
+    uiMounts.add(handle);
+    return handle;
+}
+
+let modalOwner = null;
+let modalAlive = () => false;
+
+/** All wrapper entry points share one modal slot, including drawers. */
+export function closeUi(owner) {
+    if (owner !== undefined && owner !== modalOwner) return;
+    modalAlive.cancel?.();
+    modalOwner = null;
+    for (const [, close] of Object.values(uiModals)) clerk[close]?.();
+}
+
+export async function openUi(name, props, dotnetRef, owner) {
+    try {
+        requireUi();
+        const methods = uiModals[name];
+        if (!methods) throw clerkError('invalid_ui_modal', `Unsupported Clerk modal '${name}'.`);
+        closeUi();
+        modalOwner = owner ?? null;
+        let alive = true;
+        modalAlive = () => alive;
+        modalAlive.cancel = () => { alive = false; };
+        clerk[methods[0]](uiProps(props, dotnetRef, modalAlive));
+        return { value: true };
+    } catch (error) { return errorPayload(error); }
+}
+
+let oneTapOwner = null;
+export function openOneTap(props, owner) {
+    requireUi();
+    clerk.closeGoogleOneTap();
+    oneTapOwner = owner;
+    clerk.openGoogleOneTap(props || {});
+    return {
+        release() {
+            if (oneTapOwner !== owner) return;
+            oneTapOwner = null;
+            clerk.closeGoogleOneTap();
+        },
+    };
+}
+
+export async function reverify(level) {
+    try {
+        requireUi();
+        closeUi();
+        const verified = await new Promise((resolve) => {
+            let done = false;
+            const finish = (value) => {
+                if (done) return;
+                done = true;
+                resolve(value);
+            };
+            modalAlive = () => !done;
+            modalAlive.cancel = () => finish(false);
+            clerk.__internal_openReverification({
+                level,
+                afterVerification: () => finish(true),
+                afterVerificationCancelled: () => finish(false),
+            });
+        });
+        return { value: verified };
+    } catch (error) { return errorPayload(error); }
+}
 
 // ── Specialised helpers (things that cannot cross the interop boundary) ─────
 
@@ -591,63 +772,3 @@ export function unmountPaymentElement(id) {
     handles.delete(id);
     paymentElements.delete(id);
 }
-
-// ── DOM helpers used by native components ──────────────────────────────────
-
-export function focus(element) { element?.focus?.(); }
-
-export function focusFirst(root, selector) {
-    const panel = root?.querySelector(selector);
-    panel?.querySelector('[role=menuitem],button,a[href],input')?.focus?.();
-}
-
-export function trapFocus(container, dotnetRef) {
-    const previous = document.activeElement;
-    const selector = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
-    const onKey = (e) => {
-        if (e.key === 'Escape') { e.preventDefault(); dotnetRef?.invokeMethodAsync('OnEscape'); return; }
-        if (e.key !== 'Tab') return;
-        const items = [...container.querySelectorAll(selector)].filter((el) => el.offsetParent !== null);
-        if (!items.length) return;
-        const first = items[0], last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    container.addEventListener('keydown', onKey);
-    (container.querySelector('[autofocus]') || container.querySelector(selector) || container).focus();
-    return { release: () => { container.removeEventListener('keydown', onKey); previous?.focus?.(); } };
-}
-
-/** Opens a native modal <dialog> (focus trap, inert background and Escape handling come from the platform). */
-export function showDialog(dialog, dotnetRef) {
-    if (!dialog) return null;
-    const previous = document.activeElement;
-    const onCancel = (e) => { e.preventDefault(); dotnetRef?.invokeMethodAsync('OnEscape'); };
-    const onClick = (e) => { if (e.target === dialog) dotnetRef?.invokeMethodAsync('OnEscape'); };
-    dialog.addEventListener('cancel', onCancel);
-    dialog.addEventListener('click', onClick);
-    if (!dialog.open) dialog.showModal();
-    (dialog.querySelector('[autofocus]') || dialog.querySelector('input,select,textarea,button:not(.cb-dialog__close)') || dialog).focus?.();
-    return {
-        release: () => {
-            dialog.removeEventListener('cancel', onCancel);
-            dialog.removeEventListener('click', onClick);
-            if (dialog.open) dialog.close();
-            previous?.focus?.();
-        },
-    };
-}
-
-export function onOutsideClick(container, dotnetRef) {
-    const handler = (e) => { if (!container.contains(e.target)) dotnetRef.invokeMethodAsync('OnOutsideClick'); };
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); dotnetRef.invokeMethodAsync('OnOutsideClick'); } };
-    document.addEventListener('pointerdown', handler, true);
-    container.addEventListener('keydown', onKey);
-    return { release: () => { document.removeEventListener('pointerdown', handler, true); container.removeEventListener('keydown', onKey); } };
-}
-
-export async function copyToClipboard(text) {
-    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
-}
-
-export function currentUrl() { return location.href; }

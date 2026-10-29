@@ -11,18 +11,14 @@ namespace Sample.Tests;
 [Parallelizable(ParallelScope.Self)]
 public class ClerkSignInE2ETests : PageTest
 {
-    // Credentials are read from environment variables so they are not hardcoded
-    // in source control.  The fallback values point to the shared Clerk test
-    // account that the project maintainers use for CI; rotate them if they are
-    // ever exposed.  To run this test locally, set CLERK_TEST_EMAIL and
-    // CLERK_TEST_PASSWORD in your shell (or a .env file that you load first).
+    // Test credentials must be supplied explicitly; never ship fallback credentials.
     private static string TestEmail =>
         Environment.GetEnvironmentVariable("CLERK_TEST_EMAIL")
-        ?? "a042c1b7a9+clerk_test@clerkcookie.com";
+        ?? throw new InvalidOperationException("Set CLERK_TEST_EMAIL to run the real sign-in test.");
 
     private static string TestPassword =>
         Environment.GetEnvironmentVariable("CLERK_TEST_PASSWORD")
-        ?? "lkddsjsdlkjdslj";
+        ?? throw new InvalidOperationException("Set CLERK_TEST_PASSWORD to run the real sign-in test.");
 
     // 424242 is Clerk's documented magic verification code for test-mode accounts.
     private const string TestVerificationCode = "424242";
@@ -93,13 +89,13 @@ public class ClerkSignInE2ETests : PageTest
         await Page.EvaluateAsync("() => { window.__wasmAlive = true; }");
 
         // ── Step 1: email / identifier ─────────────────────────────────────
-        var identifierInput = Page.Locator(".cb-sign-in input[name='identifier']");
+        var identifierInput = Page.Locator(".cl-signIn-root input[name='identifier']");
         await identifierInput.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
         await identifierInput.First.FillAsync(TestEmail);
         await Page.GetByRole(AriaRole.Button, new() { Name = "Continue" }).First.ClickAsync();
 
         // ── Step 2: password ───────────────────────────────────────────────
-        var passwordInput = Page.Locator(".cb-sign-in input[name='password']");
+        var passwordInput = Page.Locator(".cl-signIn-root input[name='password']");
         await passwordInput.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
         await passwordInput.First.FillAsync(TestPassword);
         await Page.GetByRole(AriaRole.Button, new() { Name = "Continue" }).First.ClickAsync();

@@ -4,7 +4,7 @@ namespace Sample.Tests;
 
 /// <summary>
 /// Base class for browser tests. Installs an in-memory fake of the ClerkJS <c>window.Clerk</c>
-/// global before the app boots, so the real <c>clerk-blazor.js</c> bridge and Razor components
+/// global before the app boots, so the real <c>clerk-blazor.js</c> bridge and Blazor wrappers
 /// run end-to-end without contacting Clerk. Tests drive the fake through <c>window.__fakeClerk</c>.
 /// </summary>
 public abstract class ClerkPageTest : PageTest
@@ -36,6 +36,11 @@ public abstract class ClerkPageTest : PageTest
             organizationSettings: { enabled: false }, authConfig: { singleSessionMode: true },
           };
 
+          const components = ['SignIn', 'SignUp', 'UserAvatar', 'UserButton', 'UserProfile',
+            'OrganizationProfile', 'CreateOrganization', 'OrganizationSwitcher', 'OrganizationList',
+            'Waitlist', 'PricingTable', 'OAuthConsent', 'APIKeys', 'TaskChooseOrganization',
+            'TaskResetPassword', 'TaskSetupMFA'];
+          const modals = ['SignIn', 'SignUp', 'UserProfile', 'OrganizationProfile', 'CreateOrganization', 'Waitlist'];
           class FakeClerk {
             constructor(key) { this.publishableKey = key; this.loaded = false; this.version = '6.42.0-fake'; this.environment = environment; this.calls = []; window.__fakeClerk = this; }
             get session() { return this.client.sessions[0] ?? null; }
@@ -52,10 +57,45 @@ public abstract class ClerkPageTest : PageTest
             signIn() { this.client = { ...this.client, sessions: [session] }; this.emit(); }
             async signOut() { this.calls.push('signOut'); this.client = { ...this.client, sessions: [] }; this.emit(); }
             async setActive() { this.emit(); }
-            mountSignIn() { this.calls.push('mountSignIn'); }
-            openSignIn() { this.calls.push('openSignIn'); }
+            mount(name, node, props) {
+              this.calls.push('mount' + name);
+              this.lastProps = { ...this.lastProps, [name]: props };
+              node.dataset.mounted = name;
+              if (name === 'SignIn') node.innerHTML = '<div class="cl-signIn-root"><label>Email address<input name="identifier"></label><button>Continue</button></div>';
+              else if (name === 'UserButton') node.innerHTML = '<button class="cl-userButtonTrigger">Ada Lovelace</button>';
+              else node.textContent = name;
+            }
+            unmount(name, node) { this.calls.push('unmount' + name); node.replaceChildren(); delete node.dataset.mounted; }
+            open(name, props) {
+              this.calls.push('open' + name);
+              this.lastModalProps = props;
+              const modal = document.createElement('section');
+              modal.setAttribute('role', 'dialog');
+              modal.setAttribute('data-fake-clerk-modal', name);
+              modal.innerHTML = '<h2>' + name + '</h2><button aria-label="Close">Close</button>';
+              modal.querySelector('button').onclick = () => modal.remove();
+              document.body.appendChild(modal);
+              // Deliberately does not deduplicate: the bridge must coordinate separate triggers.
+            }
+            close(name) { this.calls.push('close' + name); document.querySelectorAll('[data-fake-clerk-modal="' + name + '"]').forEach(n => n.remove()); }
+            openGoogleOneTap(props) { this.calls.push('openGoogleOneTap'); this.lastOneTapProps = props; }
+            closeGoogleOneTap() { this.calls.push('closeGoogleOneTap'); }
           }
+          for (const name of components) {
+            FakeClerk.prototype['mount' + name] = function(node, props) { this.mount(name, node, props); };
+            FakeClerk.prototype['unmount' + name] = function(node) { this.unmount(name, node); };
+          }
+          for (const name of modals) {
+            FakeClerk.prototype['open' + name] = function(props) { this.open(name, props); };
+            FakeClerk.prototype['close' + name] = function() { this.close(name); };
+          }
+          for (const name of ['Checkout', 'PlanDetails', 'SubscriptionDetails', 'Reverification']) {
+            FakeClerk.prototype['__internal_open' + name] = function(props) { this.open(name, props); };
+            FakeClerk.prototype['__internal_close' + name] = function() { this.close(name); };
+          }
+          document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelector('[data-fake-clerk-modal]')?.remove(); });
           window.Clerk = FakeClerk;
+          window.__internal_ClerkUICtor = class FakeClerkUI {};
         })();
         """;
 

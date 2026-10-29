@@ -7,8 +7,9 @@
 }
 else
 {
-    <button type="button" class="@RootClass("cb-btn cb-btn--outline")" disabled="@Busy" @onclick="SignOutAsync" @attributes="AdditionalAttributes">@L.SignOut</button>
+    <button type="button" class="cb-trigger cb-trigger--button @Class" disabled="@Busy" @onclick="SignOutAsync" @attributes="AdditionalAttributes">@L.SignOut</button>
 }
+<Clerk.Blazor.Internal.Alert Message="@GlobalError()" />
 
 @code {
     [Parameter] public string? RedirectUrl { get; set; }

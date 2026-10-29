@@ -105,14 +105,14 @@ public sealed class ClerkService : IAsyncDisposable
     public SessionApi Session { get; }
 
     /// <summary>
-    /// Invoked when an operation needs the user to re-verify. <see cref="Components.ClerkProvider"/>
-    /// registers a handler that shows the native verification dialog. Returns <c>true</c> when verified.
+    /// Application override for the default Clerk UI verification dialog.
+    /// Required for custom reverification in headless mode. Returns <c>true</c> when verified.
     /// </summary>
     public Func<ReverificationRequirement, Task<bool>>? ReverificationHandler { get; set; }
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
-    /// <summary>Loads ClerkJS (headless). Safe to call multiple times.</summary>
+    /// <summary>Loads ClerkJS and the configured UI. Safe to call multiple times.</summary>
     public Task LoadAsync() => _loadTask ??= LoadCoreAsync();
 
     private async Task LoadCoreAsync()
@@ -142,6 +142,8 @@ public sealed class ClerkService : IAsyncDisposable
     {
         var o = _options;
         var loadOptions = ClerkArgs.Of(
+            ("appearance", o.UIAppearance ?? o.Appearance.ToClerkAppearance()),
+            ("localization", o.UILocalization),
             ("signInUrl", o.SignInUrl),
             ("signUpUrl", o.SignUpUrl),
             ("waitlistUrl", o.WaitlistUrl),
@@ -169,6 +171,9 @@ public sealed class ClerkService : IAsyncDisposable
             ("domain", o.Domain),
             ("clerkJSVersion", o.ClerkJSVersion),
             ("clerkJSUrl", o.ClerkJSUrl),
+            ("clerkUIVersion", o.ClerkUIVersion),
+            ("clerkUIUrl", o.ClerkUIUrl),
+            ("loadUserInterface", o.LoadUserInterface),
             ("nonce", o.Nonce),
             ("stylesheetUrl", o.InjectStyles ? new Uri(new Uri(_nav.BaseUri), "_content/Clerk.Blazor/clerk-blazor.css").ToString() : null),
             ("loadOptions", loadOptions));
@@ -223,8 +228,8 @@ public sealed class ClerkService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Invokes a ClerkJS method by path (e.g. <c>"client.signIn.create"</c>). UI methods
-    /// (<c>mount*</c>, <c>open*</c>) and React-backed wallet strategies are rejected.
+    /// Invokes a ClerkJS resource method by path (e.g. <c>"client.signIn.create"</c>).
+    /// Use the UI components or <see cref="OpenUiAsync"/> for UI lifecycle operations.
     /// </summary>
     public async Task<ClerkResource> InvokeAsync(string path, params object?[] args) =>
         new(this, await RunAsync("invoke", path, args));
@@ -239,6 +244,17 @@ public sealed class ClerkService : IAsyncDisposable
 
     internal async Task<IJSObjectReference> BridgeModuleAsync() => await ModuleAsync();
 
+    /// <summary>Opens a Clerk modal, closing any modal previously opened through this integration.</summary>
+    public async Task OpenUiAsync(ClerkUiModal modal, IReadOnlyDictionary<string, object?>? props = null) =>
+        await RunAsync("openUi", modal.ToString(), props);
+
+    /// <summary>Closes Clerk modals and drawers.</summary>
+    public async Task CloseUiAsync()
+    {
+        var module = await ModuleAsync();
+        await module.InvokeVoidAsync("closeUi");
+    }
+
     /// <summary>
     /// Runs an operation that may require reverification (<c>useReverification</c>). If ClerkJS
     /// reports that reverification is required, the registered handler prompts the user
@@ -250,9 +266,17 @@ public sealed class ClerkService : IAsyncDisposable
         {
             return await operation();
         }
-        catch (ClerkReverificationRequiredException) when (ReverificationHandler is not null)
+        catch (ClerkReverificationRequiredException) when (ReverificationHandler is not null || Options.LoadUserInterface)
         {
-            var verified = await ReverificationHandler(requirement ?? ReverificationRequirement.FromPreset(ReverificationPreset.Strict));
+            var needed = requirement ?? ReverificationRequirement.FromPreset(ReverificationPreset.Strict);
+            var verified = ReverificationHandler is not null
+                ? await ReverificationHandler(needed)
+                : (await RunAsync("reverify", needed.Level switch
+                {
+                    ReverificationLevel.FirstFactor => "firstFactor",
+                    ReverificationLevel.MultiFactor => "multiFactor",
+                    _ => "secondFactor",
+                })).GetBoolean();
             if (!verified) throw new ClerkException("reverification_cancelled", "Verification was cancelled.");
             return await operation();
         }

@@ -24,6 +24,21 @@ public sealed class ClerkOptions
     /// <summary>Full URL of a self-hosted <c>clerk.browser.js</c>. Overrides <see cref="ClerkJSVersion"/>.</summary>
     public string? ClerkJSUrl { get; set; }
 
+    /// <summary>Load Clerk's official UI (and its bundled React runtime). Disable for a service-only/headless integration.</summary>
+    public bool LoadUserInterface { get; set; } = true;
+
+    /// <summary>Pinned Clerk UI release, compatible with the default ClerkJS release.</summary>
+    public string ClerkUIVersion { get; set; } = ClerkConstants.ClerkUIVersion;
+
+    /// <summary>Optional self-hosted URL of ui.browser.js, including access to its adjacent chunks.</summary>
+    public string? ClerkUIUrl { get; set; }
+
+    /// <summary>Clerk's appearance object: variables, elements, layout and per-component overrides.</summary>
+    public Dictionary<string, object?>? UIAppearance { get; set; }
+
+    /// <summary>Clerk's nested localization object, passed directly to Clerk UI.</summary>
+    public Dictionary<string, object?>? UILocalization { get; set; }
+
     /// <summary>CSP nonce applied to the injected ClerkJS script.</summary>
     public string? Nonce { get; set; }
 
@@ -84,18 +99,18 @@ public sealed class ClerkOptions
     /// <summary>Whether to load the bundled stylesheet automatically. Defaults to <c>true</c>.</summary>
     public bool InjectStyles { get; set; } = true;
 
-    /// <summary>Localized strings used by native components.</summary>
+    /// <summary>Localized strings used by Blazor-owned trigger buttons and headless custom UI.</summary>
     public ClerkLocalization Localization { get; set; } = new();
 
-    /// <summary>Theme and design tokens for native components (Clerk React's <c>appearance</c> prop).</summary>
+    /// <summary>Legacy design tokens, translated into Clerk UI variables. UIAppearance takes precedence.</summary>
     public ClerkAppearance Appearance { get; set; } = new();
 }
 
 public enum ClerkTheme { Auto, Light, Dark }
 
 /// <summary>
-/// Visual customization. Values map to CSS custom properties on every component root, so
-/// you can also override <c>--cb-*</c> variables or target <c>cb-*</c> classes in your own CSS.
+/// Legacy visual customization, translated into Clerk UI appearance variables.
+/// Prefer <see cref="ClerkOptions.UIAppearance"/> for full upstream customization.
 /// </summary>
 public sealed class ClerkAppearance
 {
@@ -111,8 +126,36 @@ public sealed class ClerkAppearance
     public string? BorderRadius { get; set; }
     public string? FontFamily { get; set; }
     public string? FontSize { get; set; }
-    /// <summary>Extra CSS class added to every component root.</summary>
+    /// <summary>Extra class for legacy Blazor-owned status elements, not Clerk UI internals.</summary>
     public string? RootClass { get; set; }
+
+    internal Dictionary<string, object?> ToClerkAppearance()
+    {
+        var variables = new Dictionary<string, object?>();
+        void Add(string name, string? value) { if (!string.IsNullOrWhiteSpace(value)) variables[name] = value; }
+        if (Theme == ClerkTheme.Dark)
+        {
+            variables["colorBackground"] = "#212126";
+            variables["colorForeground"] = "#ffffff";
+            variables["colorInput"] = "#27272a";
+            variables["colorInputForeground"] = "#ffffff";
+            variables["colorMutedForeground"] = "#a1a1aa";
+            variables["colorPrimary"] = "#ffffff";
+            variables["colorPrimaryForeground"] = "#18181b";
+        }
+        Add("colorPrimary", ColorPrimary);
+        Add("colorPrimaryForeground", ColorPrimaryForeground);
+        Add("colorBackground", ColorBackground);
+        Add("colorForeground", ColorForeground);
+        Add("colorMutedForeground", ColorMuted);
+        Add("colorBorder", ColorBorder);
+        Add("colorDanger", ColorDanger);
+        Add("colorSuccess", ColorSuccess);
+        Add("borderRadius", BorderRadius);
+        Add("fontFamily", FontFamily);
+        Add("fontSize", FontSize);
+        return new() { ["variables"] = variables };
+    }
 
     internal string? ToStyle()
     {
@@ -138,9 +181,10 @@ public sealed class ClerkAppearance
 /// <summary>Version information.</summary>
 public static class ClerkConstants
 {
-    /// <summary>The ClerkJS release the bridge has been audited against (headless, React-free).</summary>
+    /// <summary>The ClerkJS release used by the bridge.</summary>
     public const string ClerkJSVersion = "6.42.0";
 
+    public const string ClerkUIVersion = "1.42.1";
     /// <summary>The Clerk React release used as the parity reference.</summary>
     public const string ClerkReactReferenceVersion = "6.18.3";
 }
