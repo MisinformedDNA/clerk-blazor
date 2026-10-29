@@ -1,0 +1,43 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@using Clerk.Blazor.Internal
+
+@* Native waitlist form (<Waitlist />). *@
+<Card Title="@(_joined ? L.WaitlistSuccessTitle : L.WaitlistTitle)" Subtitle="@(_joined ? null : L.WaitlistSubtitle)"
+      Class="@($"cb-waitlist {Class}")" AdditionalAttributes="AdditionalAttributes" Footer="@FooterContent">
+    @if (_joined)
+    {
+        <div class="cb-stack cb-center" role="status">
+            <svg class="cb-success-icon" viewBox="0 0 24 24" width="32" height="32" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.5 12.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p class="cb-text">@L.WaitlistSuccess</p>
+        </div>
+    }
+    else
+    {
+        <form class="cb-form" @onsubmit="JoinAsync" @onsubmit:preventDefault novalidate>
+            <Field Label="@L.EmailAddress" Type="email" @bind-Value="_email" Autocomplete="email" Required AutoFocus Error="@FieldError("email_address")" />
+            <Alert Message="@GlobalError("email_address")" />
+            <Btn Type="submit" Block Busy="Busy">@L.WaitlistButton</Btn>
+        </form>
+    }
+</Card>
+
+@code {
+    private string _email = "";
+    private bool _joined;
+
+    /// <summary>Where to go after joining. When unset, a confirmation is shown.</summary>
+    [Parameter] public string? AfterJoinWaitlistUrl { get; set; }
+    /// <summary>Sign-in link in the footer. Defaults to <see cref="ClerkOptions.SignInUrl"/>.</summary>
+    [Parameter] public string? SignInUrl { get; set; }
+
+    private RenderFragment FooterContent => @<p class="cb-footer-text">@L.HaveAccount <a class="cb-link" href="@((SignInUrl ?? Clerk.Options.SignInUrl).TrimStart('/'))">@L.SignInLink</a></p>;
+
+    private async Task JoinAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_email)) return;
+        if (!await RunAsync(() => Clerk.Waitlist.JoinAsync(_email.Trim()))) return;
+        if (!string.IsNullOrEmpty(AfterJoinWaitlistUrl)) { Go(AfterJoinWaitlistUrl); return; }
+        _joined = true;
+    }
+}

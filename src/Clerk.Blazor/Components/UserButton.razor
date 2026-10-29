@@ -1,0 +1,87 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-user-button")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <CascadingValue Value="_registry" IsFixed="true">@ChildContent @MenuItems</CascadingValue>
+    @if (State.User is { } user)
+    {
+        <Popover @bind-Open="_open" Role="menu" AriaLabel="@L.OpenUserMenu">
+            <Trigger>
+                <button type="button" class="cb-trigger cb-person" aria-label="@L.OpenUserMenu" aria-haspopup="menu" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open">
+                    <Avatar ImageUrl="@user.ImageUrl" Name="@user.DisplayName" />
+                    @if (ShowName) { <span class="cb-person__name">@user.DisplayName</span> }
+                </button>
+            </Trigger>
+            <ChildContent>
+                <div class="cb-menu">
+                    <div class="cb-menu__header cb-person" role="presentation">
+                        <Avatar ImageUrl="@user.ImageUrl" Name="@user.DisplayName" Size="40" />
+                        <div class="cb-person__text"><span class="cb-person__name">@user.DisplayName</span><span class="cb-person__sub">@user.Identifier</span></div>
+                    </div>
+                    <div class="cb-menu__section" role="group">
+                        <button type="button" class="cb-menu__item" role="menuitem" @onclick="() => OpenProfile()">@L.ManageAccount</button>
+                        @foreach (var entry in _registry.Entries.Values.ToArray())
+                        {
+                            @if (entry.Href is { } href)
+                            { <a class="cb-menu__item" role="menuitem" href="@href">@entry.Icon @entry.Label</a> }
+                            else
+                            { <button type="button" class="cb-menu__item" role="menuitem" disabled="@Busy" @onclick="() => CustomAsync(entry)">@entry.Icon @entry.Label</button> }
+                        }
+                        <button type="button" class="cb-menu__item" role="menuitem" disabled="@Busy" @onclick="() => SignOutAsync(false)">@L.SignOut</button>
+                    </div>
+                    @if (!Env.SingleSessionMode)
+                    {
+                        <div class="cb-menu__section" role="group" aria-label="@L.ChooseAccount">
+                            @foreach (var session in State.Client?.Sessions.Where(s => s.Id != State.Session?.Id && s.Status == "active") ?? [])
+                            {
+                                <button type="button" class="cb-menu__item" role="menuitem" disabled="@Busy" @onclick="() => SwitchAsync(session.Id)">
+                                    <Avatar ImageUrl="@session.User?.ImageUrl" Name="@session.User?.DisplayName" />
+                                    <span class="cb-person__text"><span class="cb-person__name">@session.User?.DisplayName</span><span class="cb-person__sub">@session.User?.Identifier</span></span>
+                                </button>
+                            }
+                            <a class="cb-menu__item" role="menuitem" href="@(SignInUrl ?? Clerk.Options.SignInUrl)">@L.AddAccount</a>
+                            <button type="button" class="cb-menu__item" role="menuitem" disabled="@Busy" @onclick="() => SignOutAsync(true)">@L.SignOutAll</button>
+                        </div>
+                    }
+                    <Alert Message="@GlobalError()" />
+                </div>
+            </ChildContent>
+        </Popover>
+        <Modal @bind-Open="_profileOpen" Title="@L.ManageAccount" CloseLabel="@L.Close" Class="cb-dialog--wide">
+            <UserProfile InitialPage="@_profilePage" Routing="ClerkRouting.Virtual" CustomPages="UserProfilePages" BillingContent="BillingContent" ApiKeysContent="ApiKeysContent" />
+        </Modal>
+    }
+</div>
+
+@code {
+    [Parameter] public bool ShowName { get; set; }
+    [Parameter] public ClerkUserProfileMode UserProfileMode { get; set; } = ClerkUserProfileMode.Modal;
+    [Parameter] public string? UserProfileUrl { get; set; }
+    [Parameter] public string? SignInUrl { get; set; }
+    [Parameter] public string? AfterSignOutUrl { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? MenuItems { get; set; }
+    [Parameter] public RenderFragment? UserProfilePages { get; set; }
+    [Parameter] public RenderFragment? BillingContent { get; set; }
+    [Parameter] public RenderFragment? ApiKeysContent { get; set; }
+    private readonly UserButtonRegistry _registry = new();
+    private bool _open, _profileOpen;
+    private string? _profilePage;
+    protected override void OnInitialized() { base.OnInitialized(); _registry.Changed = () => _ = InvokeAsync(StateHasChanged); }
+    private void OpenProfile(string? page = null)
+    {
+        _open = false;
+        if (UserProfileMode == ClerkUserProfileMode.Navigation)
+            Go((UserProfileUrl ?? Clerk.Options.UserProfileUrl).TrimEnd('/') + (page is null ? "" : "/" + page.Trim('/')));
+        else { _profilePage = page; _profileOpen = true; }
+    }
+    private async Task CustomAsync(UserButtonEntry entry)
+    {
+        if (entry.OnClick.HasDelegate && !await RunAsync(() => entry.OnClick.InvokeAsync())) return;
+        if (entry.Open is { } page) OpenProfile(page);
+        else _open = false;
+    }
+    private async Task SwitchAsync(string id) { if (await RunAsync(() => Clerk.Session.SwitchAsync(id))) _open = false; }
+    private async Task SignOutAsync(bool all) { if (await RunAsync(() => Clerk.SignOutAsync(all ? null : State.Session?.Id, AfterSignOutUrl))) _open = false; }
+    public override void Dispose() { _registry.Changed = null; base.Dispose(); }
+}

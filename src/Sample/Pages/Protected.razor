@@ -1,12 +1,14 @@
-﻿@using Microsoft.AspNetCore.Authorization
-@using System.Net.Http.Json
 @page "/protected"
+@using Microsoft.AspNetCore.Authorization
+@using System.Net.Http.Json
 @attribute [Authorize]
 
-@inject ClerkAuthService ClerkAuth
+@inject ClerkService Clerk
 @inject IHttpClientFactory HttpClientFactory
 
 <h3>Protected</h3>
+
+<p>Signed in as <strong>@Clerk.State.User?.FullName</strong> (<code>@Clerk.State.Auth.UserId</code>).</p>
 
 <h4>API call to <code>GET /me</code></h4>
 
@@ -32,7 +34,7 @@ else if (_userId is not null)
     {
         try
         {
-            var token = await ClerkAuth.GetTokenAsync();
+            var token = await Clerk.GetTokenAsync();
             if (string.IsNullOrWhiteSpace(token))
             {
                 _error = "No session token available. Please sign in again.";
@@ -40,8 +42,7 @@ else if (_userId is not null)
             }
 
             var client = HttpClientFactory.CreateClient("SampleApi");
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
             var response = await client.GetFromJsonAsync<MeResponse>("me");
             _userId = response?.UserId;

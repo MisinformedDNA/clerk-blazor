@@ -1,0 +1,170 @@
+@namespace Clerk.Blazor.Internal
+@inherits Clerk.Blazor.Components.ClerkComponentBase
+
+@* Subscription details drawer (<SubscriptionDetails />): items, next payment, cancel, resubscribe and period switch. *@
+<Modal Open="Open" OpenChanged="OnOpenChanged" Drawer Title="@L.BillingSubscriptionDetails" CloseLabel="@L.Close" Class="@($"cb-subscription-details {Class}")">
+    @if (!_loaded)
+    {
+        @if (Error is null)
+        {
+            <div class="cb-center" role="status"><span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>
+        }
+        else
+        {
+            <Alert Message="@GlobalError()" />
+        }
+    }
+    else if (Items.Count == 0)
+    {
+        <p class="cb-empty">@L.BillingNoSubscription</p>
+    }
+    else
+    {
+        <div class="cb-stack">
+            <ul class="cb-subs">
+                @foreach (var item in Items)
+                {
+                    var (badge, kind) = BillingFormat.Status(item.Status, L, item.CanceledAt);
+                    var plan = item.Plan;
+                    <li class="cb-sub">
+                        <div class="cb-spread">
+                            <span class="cb-inline">
+                                <strong class="cb-plan__name">@plan?.Name</strong>
+                                <span class="@BillingFormat.BadgeClass(kind)">@badge</span>
+                                @if (item.IsFreeTrial) { <span class="cb-badge cb-badge--primary">@L.BillingFreeTrial</span> }
+                            </span>
+                            <span class="cb-text">
+                                @if (plan is null || plan.IsFree) { @L.Free }
+                                else
+                                {
+                                    @BillingFormat.Money(item.PlanPeriod == "annual" ? plan.AnnualMonthlyFee ?? plan.Fee : plan.Fee)
+                                    <span class="cb-muted">@L.PerMonth</span>
+                                }
+                            </span>
+                        </div>
+                        @if (Meta(item) is { Length: > 0 } meta) { <p class="cb-muted">@meta</p> }
+                        @if (_confirming == item.Id)
+                        {
+                            <div class="cb-stack cb-stack--sm" role="group" aria-label="@L.CancelSubscription">
+                                <p class="cb-text">@(item.PeriodEnd is not null && item.Status != "upcoming"
+                                    ? Format(L.BillingCancelConfirm, plan?.Name, BillingFormat.Date(item.PeriodEnd))
+                                    : Format(L.BillingCancelConfirmNow, plan?.Name))</p>
+                                <Alert Message="@GlobalError()" />
+                                <div class="cb-actions">
+                                    <Btn Variant="ghost" Class="cb-btn--sm" Disabled="Busy" OnClick="() => _confirming = null">@L.BillingKeepSubscription</Btn>
+                                    <Btn Variant="danger" Class="cb-btn--sm" Busy="Busy" OnClick="() => CancelAsync(item)">@L.CancelSubscription</Btn>
+                                </div>
+                            </div>
+                        }
+                        else if (plan is { IsFree: false })
+                        {
+                            <div class="cb-actions">
+                                @if (item.CanceledAt is not null)
+                                {
+                                    <Btn Variant="outline" Class="cb-btn--sm" OnClick="() => CheckoutAsync(plan, item.PlanPeriod)">@L.BillingResubscribe</Btn>
+                                }
+                                else
+                                {
+                                    @if (item.Status == "active" && BillingFormat.HasAnnual(plan))
+                                    {
+                                        var other = item.PlanPeriod == "annual" ? "month" : "annual";
+                                        <Btn Variant="outline" Class="cb-btn--sm" OnClick="() => CheckoutAsync(plan, other)">@(other == "annual" ? L.BillingSwitchToAnnual : L.BillingSwitchToMonthly)</Btn>
+                                    }
+                                    @if (item.Status is "active" or "upcoming" or "past_due")
+                                    {
+                                        <Btn Variant="danger-outline" Class="cb-btn--sm" OnClick="() => { Error = null; _confirming = item.Id; }">@L.CancelSubscription</Btn>
+                                    }
+                                }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (_subscription?.NextPayment is { Amount: not null } next)
+            {
+                <div class="cb-summary">
+                    <div class="cb-summary__row"><span>@L.BillingNextPayment</span><span>@Format(L.BillingNextPaymentOn, BillingFormat.Money(next.Amount), BillingFormat.Date(next.Date))</span></div>
+                </div>
+            }
+            @if (_confirming is null) { <Alert Message="@GlobalError()" /> }
+        </div>
+    }
+</Modal>
+<CheckoutDrawer @bind-Open="_checkoutOpen" PlanId="@_checkoutPlan" PlanPeriod="@_checkoutPeriod" For="@For" OnSubscriptionComplete="OnCheckoutComplete" />
+
+@code {
+    private BillingSubscription? _subscription;
+    private bool _loaded;
+    private bool _loading;
+    private string? _confirming;
+    private bool _checkoutOpen;
+    private string? _checkoutPlan;
+    private string _checkoutPeriod = "month";
+
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    /// <summary><c>user</c> or <c>organization</c>.</summary>
+    [Parameter] public string For { get; set; } = "user";
+    [Parameter] public EventCallback OnSubscriptionCancel { get; set; }
+    /// <summary>Raised after a resubscribe or period switch completes.</summary>
+    [Parameter] public EventCallback OnSubscriptionChange { get; set; }
+
+    private bool ForOrganization => BillingFormat.IsOrganization(For);
+
+    private string Meta(BillingSubscriptionItem item)
+    {
+        var parts = new List<string>();
+        if (item.Plan is { IsFree: false }) parts.Add(item.PlanPeriod == "annual" ? L.Annually : L.Monthly);
+        if (item.Status == "upcoming") parts.Add(Format(L.BillingStartsOn, BillingFormat.Date(item.PeriodStart)));
+        else if (item.PeriodStart is not null) parts.Add(Format(L.BillingSubscribedOn, BillingFormat.Date(item.PeriodStart)));
+        if (item.PeriodEnd is not null && item.Plan is { IsFree: false })
+            parts.Add(Format(item.CanceledAt is not null ? L.EndsOn : item.IsFreeTrial ? L.BillingTrialEndsOn : L.RenewsOn, BillingFormat.Date(item.PeriodEnd)));
+        return string.Join(" · ", parts);
+    }
+
+    private IReadOnlyList<BillingSubscriptionItem> Items =>
+        _subscription?.SubscriptionItems.Where(i => i.Status is not ("ended" or "abandoned" or "incomplete")).ToList() ?? [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open && !_loaded && !_loading) await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            if (await RunAsync(async () => _subscription = await Clerk.Billing.GetSubscriptionAsync(ForOrganization ? Auth.OrgId : null)))
+                _loaded = true;
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task CancelAsync(BillingSubscriptionItem item)
+    {
+        if (await RunAsync(() => Clerk.Billing.CancelSubscriptionItemAsync(item, ForOrganization ? Auth.OrgId : null)))
+        {
+            _confirming = null;
+            await LoadAsync();
+            await OnSubscriptionCancel.InvokeAsync();
+        }
+    }
+
+    private async Task CheckoutAsync(BillingPlan plan, string period)
+    {
+        _checkoutPlan = plan.Id;
+        _checkoutPeriod = period;
+        await OnOpenChanged(false);
+        _checkoutOpen = true;
+    }
+
+    private async Task OnCheckoutComplete() => await OnSubscriptionChange.InvokeAsync();
+
+    private async Task OnOpenChanged(bool open)
+    {
+        Open = open;
+        if (!open) { _loaded = false; _confirming = null; Error = null; }
+        await OpenChanged.InvokeAsync(open);
+    }
+}

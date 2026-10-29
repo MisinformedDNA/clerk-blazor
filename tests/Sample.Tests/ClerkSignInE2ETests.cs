@@ -7,6 +7,7 @@ namespace Sample.Tests;
 /// real credentials against the live Clerk instance.
 /// </summary>
 [TestFixture]
+[Explicit("Requires a real Clerk publishable key in src/Sample/wwwroot/appsettings.Development.json and test credentials.")]
 [Parallelizable(ParallelScope.Self)]
 public class ClerkSignInE2ETests : PageTest
 {
@@ -30,7 +31,7 @@ public class ClerkSignInE2ETests : PageTest
     private readonly List<string> _frameNavigations = [];
     private readonly List<string> _networkRequests = [];
 
-    private string LoginUrl => $"{BlazorDevServer.BaseUrl}/login";
+    private string LoginUrl => $"{BlazorDevServer.BaseUrl}/sign-in";
 
     [SetUp]
     public void CaptureEvents()
@@ -62,7 +63,7 @@ public class ClerkSignInE2ETests : PageTest
     [TearDown]
     public async Task PrintDiagnostics()
     {
-        await Page.ScreenshotAsync(new() { Path = "/tmp/clerk_e2e_final.png", FullPage = true });
+        await Page.ScreenshotAsync(new() { Path = Path.Combine(Path.GetTempPath(), "clerk_e2e_final.png"), FullPage = true });
 
         if (_frameNavigations.Count > 0)
             TestContext.Out.WriteLine("Frame navigations:\n" + string.Join("\n", _frameNavigations));
@@ -71,7 +72,7 @@ public class ClerkSignInE2ETests : PageTest
             TestContext.Out.WriteLine("Network requests:\n" + string.Join("\n", _networkRequests));
 
         var clerkLogs = _consoleLogs
-            .Where(l => l.Contains("[clerkInterop]") || l.StartsWith("[error]") || l.StartsWith("[warning]"))
+            .Where(l => l.Contains("[Clerk.Blazor]") || l.StartsWith("[error]") || l.StartsWith("[warning]"))
             .ToList();
         if (clerkLogs.Count > 0)
             TestContext.Out.WriteLine("Relevant logs:\n" + string.Join("\n", clerkLogs));
@@ -91,23 +92,14 @@ public class ClerkSignInE2ETests : PageTest
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         await Page.EvaluateAsync("() => { window.__wasmAlive = true; }");
 
-        // ── Open the Clerk sign-in modal ───────────────────────────────────
-        var signInWithClerkBtn = Page.GetByRole(AriaRole.Button, new() { Name = "Sign in with Clerk" });
-        await Expect(signInWithClerkBtn).ToBeVisibleAsync();
-        await signInWithClerkBtn.ClickAsync();
-
         // ── Step 1: email / identifier ─────────────────────────────────────
-        var identifierInput = Page.Locator("input[name='identifier']")
-            .Or(Page.Locator("input#identifier-field"))
-            .Or(Page.GetByLabel("Email address"));
+        var identifierInput = Page.Locator(".cb-sign-in input[name='identifier']");
         await identifierInput.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 15_000 });
         await identifierInput.First.FillAsync(TestEmail);
         await Page.GetByRole(AriaRole.Button, new() { Name = "Continue" }).First.ClickAsync();
 
         // ── Step 2: password ───────────────────────────────────────────────
-        var passwordInput = Page.Locator("input[name='password']")
-            .Or(Page.Locator("input#password-field"))
-            .Or(Page.GetByLabel("Password"));
+        var passwordInput = Page.Locator(".cb-sign-in input[name='password']");
         await passwordInput.First.WaitForAsync(new() { State = WaitForSelectorState.Visible, Timeout = 10_000 });
         await passwordInput.First.FillAsync(TestPassword);
         await Page.GetByRole(AriaRole.Button, new() { Name = "Continue" }).First.ClickAsync();
@@ -124,7 +116,7 @@ public class ClerkSignInE2ETests : PageTest
             await continueAfterCode.First.ClickAsync();
 
         // ── Assertion: Sign out must appear without a page reload ──────────
-        var signOutLink = Page.GetByRole(AriaRole.Link, new() { Name = "Sign out" });
+        var signOutLink = Page.Locator("nav").GetByRole(AriaRole.Button, new() { Name = "Sign out" });
         await Expect(signOutLink.First).ToBeVisibleAsync(new() { Timeout = 20_000 });
 
         // ── Assertion: WASM runtime must still be alive ────────────────────

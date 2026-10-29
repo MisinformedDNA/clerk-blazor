@@ -1,0 +1,114 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@implements IAsyncDisposable
+
+@* Google One Tap (<GoogleOneTap />). Renders no markup; shows Google's prompt for signed-out users. *@
+
+@code {
+    private DotNetObjectReference<GoogleOneTap>? _ref;
+    private bool _initialized;
+    private bool _rendered;
+
+    /// <summary>Close the prompt when the user clicks outside it. Defaults to <c>true</c>.</summary>
+    [Parameter] public bool CancelOnTapOutside { get; set; } = true;
+    /// <summary>Enable the upgraded One Tap UX on ITP browsers. Defaults to <c>true</c>.</summary>
+    [Parameter] public bool ItpSupport { get; set; } = true;
+    /// <summary>Use FedCM for the prompt in supporting browsers. Defaults to <c>true</c>.</summary>
+    [Parameter] public bool FedCmSupport { get; set; } = true;
+    [Parameter] public string? SignInForceRedirectUrl { get; set; }
+    [Parameter] public string? SignUpForceRedirectUrl { get; set; }
+    [Parameter] public string? SignInFallbackRedirectUrl { get; set; }
+    [Parameter] public string? SignUpFallbackRedirectUrl { get; set; }
+    /// <summary>Raised when initialization or authentication fails.</summary>
+    [Parameter] public EventCallback<ClerkException> OnError { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _rendered = true;
+            await TryInitAsync();
+        }
+    }
+
+    protected override void OnClerkStateChanged(ClerkState state)
+    {
+        if (!_rendered) return;
+        if (Auth.IsSignedIn && _initialized)
+        {
+            _initialized = false;
+            _ = CancelAsync();
+        }
+        else
+        {
+            _ = TryInitAsync();
+        }
+    }
+
+    private async Task TryInitAsync()
+    {
+        if (_initialized || !Auth.IsLoaded || Auth.IsSignedIn || string.IsNullOrEmpty(Env.GoogleOneTapClientId)) return;
+        _initialized = true;
+        _ref ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await Clerk.CallBridgeAsync("initGoogleOneTap", Env.GoogleOneTapClientId, null, _ref,
+                new { cancelOnTapOutside = CancelOnTapOutside, itpSupport = ItpSupport, fedCmSupport = FedCmSupport });
+        }
+        catch (ClerkException ex)
+        {
+            _initialized = false;
+            await OnError.InvokeAsync(ex);
+        }
+    }
+
+    /// <summary>Called by Google Identity Services with the ID token credential.</summary>
+    [JSInvokable]
+    public async Task OnCredential(string credential)
+    {
+        var o = Clerk.Options;
+        var signIn = o.SignInUrl.TrimEnd('/');
+        var signUp = o.SignUpUrl.TrimEnd('/');
+        try
+        {
+            await Clerk.CallBridgeAsync("authenticateWithGoogleOneTap", credential, new Dictionary<string, object?>
+            {
+                ["signInUrl"] = o.SignInUrl,
+                ["signUpUrl"] = o.SignUpUrl,
+                ["signInForceRedirectUrl"] = SignInForceRedirectUrl ?? o.SignInForceRedirectUrl,
+                ["signUpForceRedirectUrl"] = SignUpForceRedirectUrl ?? o.SignUpForceRedirectUrl,
+                ["signInFallbackRedirectUrl"] = SignInFallbackRedirectUrl ?? o.SignInFallbackRedirectUrl,
+                ["signUpFallbackRedirectUrl"] = SignUpFallbackRedirectUrl ?? o.SignUpFallbackRedirectUrl,
+                ["continueSignUpUrl"] = $"{signUp}/continue",
+                ["firstFactorUrl"] = $"{signIn}/factor-one",
+                ["secondFactorUrl"] = $"{signIn}/factor-two",
+                ["resetPasswordUrl"] = $"{signIn}/reset-password",
+                ["verifyEmailAddressUrl"] = $"{signUp}/verify-email-address",
+                ["verifyPhoneNumberUrl"] = $"{signUp}/verify-phone-number",
+            }.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value));
+        }
+        catch (ClerkException ex)
+        {
+            await OnError.InvokeAsync(ex);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        try
+        {
+            var module = await Clerk.BridgeModuleAsync();
+            await module.InvokeVoidAsync("cancelGoogleOneTap");
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_initialized) await CancelAsync();
+        _ref?.Dispose();
+        base.Dispose();
+    }
+}

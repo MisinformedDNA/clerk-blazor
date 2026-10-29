@@ -1,0 +1,64 @@
+@page "/components"
+@inject ClerkService Clerk
+
+<PageTitle>Components</PageTitle>
+<h1>Components</h1>
+
+<p>Every Clerk React component and hook, rendered natively in Blazor. No React is downloaded.</p>
+
+<section class="showcase">
+    <h2>State</h2>
+    <dl class="showcase-state">
+        <dt>Loaded</dt><dd>@Clerk.State.IsLoaded (@Clerk.State.Status)</dd>
+        <dt>Signed in</dt><dd>@Clerk.State.Auth.IsSignedIn</dd>
+        <dt>User</dt><dd>@(Clerk.State.User?.PrimaryEmailAddress?.EmailAddress ?? "—")</dd>
+        <dt>Session</dt><dd><code>@(Clerk.State.Auth.SessionId ?? "—")</code></dd>
+        <dt>Organization</dt><dd>@(Clerk.State.Organization?.Name ?? "Personal account") @(Clerk.State.Auth.OrgRole)</dd>
+    </dl>
+</section>
+
+<section class="showcase">
+    <h2>Control components</h2>
+    <ClerkLoading><p>ClerkLoading: loading…</p></ClerkLoading>
+    <ClerkLoaded><p>ClerkLoaded: ClerkJS is ready.</p></ClerkLoaded>
+    <ClerkDegraded><p>ClerkDegraded: running from cache.</p></ClerkDegraded>
+    <ClerkFailed><p>ClerkFailed: ClerkJS could not load.</p></ClerkFailed>
+    <SignedIn><p>SignedIn: visible to signed-in users.</p></SignedIn>
+    <SignedOut><p>SignedOut: visible to signed-out users.</p></SignedOut>
+    <Show Role="org:admin" Fallback="@NotAdmin"><p>Show Role="org:admin": you are an organization admin.</p></Show>
+</section>
+
+<section class="showcase">
+    <h2>Buttons</h2>
+    <div class="showcase-row">
+        <Show When="ShowWhen.SignedOut">
+            <SignInButton Mode="ClerkButtonMode.Modal" />
+            <SignUpButton Mode="ClerkButtonMode.Modal" />
+            <SignInWithMetamaskButton />
+        </Show>
+        <Show When="ShowWhen.SignedIn">
+            <UserButton />
+            <OrganizationSwitcher />
+            <SignOutButton />
+        </Show>
+    </div>
+</section>
+
+<Show When="ShowWhen.SignedIn">
+    <section class="showcase">
+        <h2>Billing</h2>
+        <div class="showcase-row">
+            <SubscriptionDetailsButton For="user" />
+        </div>
+        <PricingTable For="user" />
+    </section>
+
+    <section class="showcase">
+        <h2>API keys</h2>
+        <APIKeys />
+    </section>
+</Show>
+
+@code {
+    private readonly RenderFragment NotAdmin = @<p>Show Role="org:admin": fallback (not an organization admin).</p>;
+}

@@ -1,0 +1,208 @@
+@namespace Clerk.Blazor.Internal
+@inherits Clerk.Blazor.Components.ClerkComponentBase
+
+@* Native checkout drawer (useCheckout): summary, saved or new payment method, confirmation and success state. *@
+<Modal Open="Open" OpenChanged="OnOpenChanged" Drawer Title="@(_done ? null : L.Checkout)" AriaLabel="@L.CheckoutComplete" CloseLabel="@L.Close" Class="@($"cb-checkout {Class}")">
+    @if (!Auth.IsSignedIn)
+    {
+        <div class="cb-stack">
+            <Alert Kind="info" Message="@L.BillingSignedInRequired" />
+            <a class="cb-btn cb-btn--primary cb-btn--block" href="@Clerk.BuildSignInUrl().TrimStart('/')">@L.SignInButton</a>
+        </div>
+    }
+    else if (_done && _checkout is not null)
+    {
+        <div class="cb-stack" role="status">
+            <div class="cb-center cb-success-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="40" height="40"><circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 12.5l3.2 3L17 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h2 class="cb-dialog__title cb-center">@L.CheckoutComplete</h2>
+            <p class="cb-text cb-muted cb-center">@(_checkout.FreeTrialEndsAt is not null ? L.BillingTrialSuccess : L.BillingCheckoutSuccess)</p>
+            <div class="cb-summary">
+                <div class="cb-summary__row"><span>@_checkout.Plan?.Name</span><span>@PeriodLabel(_checkout.PlanPeriod)</span></div>
+                <div class="cb-summary__row cb-summary__row--total"><span>@L.TotalDueToday</span><span>@BillingFormat.Money(DueNow)</span></div>
+            </div>
+            <Btn Block OnClick="ContinueAsync" autofocus>@L.Continue</Btn>
+        </div>
+    }
+    else if (_checkout is null)
+    {
+        @if (Error is null)
+        {
+            <div class="cb-center" role="status"><span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>
+        }
+        else
+        {
+            <div class="cb-stack">
+                <Alert Message="@GlobalError()" />
+                <Btn Variant="outline" Block OnClick="StartAsync">@L.Continue</Btn>
+            </div>
+        }
+    }
+    else
+    {
+        <form class="cb-form" @onsubmit="ConfirmAsync" @onsubmit:preventDefault novalidate>
+            <div class="cb-summary" aria-label="@L.Checkout">
+                <div class="cb-summary__row"><strong>@_checkout.Plan?.Name</strong><span>@PeriodLabel(_checkout.PlanPeriod)</span></div>
+                @if (_checkout.Totals?.Subtotal is { } subtotal)
+                {
+                    <div class="cb-summary__row"><span>@L.Subtotal</span><span>@BillingFormat.Money(subtotal)</span></div>
+                }
+                @if (_checkout.Totals?.Credit is { Amount: > 0 } credit)
+                {
+                    <div class="cb-summary__row"><span>@L.BillingCredit</span><span>−@BillingFormat.Money(credit)</span></div>
+                }
+                @if (_checkout.Totals?.PastDue is { Amount: > 0 } pastDue)
+                {
+                    <div class="cb-summary__row"><span>@L.BillingPastDue</span><span>@BillingFormat.Money(pastDue)</span></div>
+                }
+                @if (_checkout.Totals?.TaxTotal is { Amount: > 0 } tax)
+                {
+                    <div class="cb-summary__row"><span>@L.BillingTax</span><span>@BillingFormat.Money(tax)</span></div>
+                }
+                <div class="cb-summary__row cb-summary__row--total"><span>@L.TotalDueToday</span><span>@BillingFormat.Money(DueNow)</span></div>
+            </div>
+            @if (_checkout.FreeTrialEndsAt is { } trialEnd)
+            {
+                <p class="cb-text cb-muted">@Format(L.BillingTrialEndsOn, BillingFormat.Date(trialEnd))</p>
+            }
+
+            @if (RequiresPayment)
+            {
+                <fieldset class="cb-fieldset">
+                    <legend class="cb-field__label">@L.BillingPaymentMethod</legend>
+                    @foreach (var method in _methods)
+                    {
+                        <label class="cb-choice">
+                            <input type="radio" name="@_group" value="@method.Id" checked="@(_selected == method.Id)" @onchange="() => _selected = method.Id" />
+                            <span class="cb-choice__body">
+                                <span>@BillingFormat.Card(method, L)</span>
+                                @if (BillingFormat.Expiry(method) is { } exp) { <span class="cb-muted">@Format(L.BillingCardExpires, exp)</span> }
+                            </span>
+                            @if (method.IsDefault) { <span class="cb-badge">@L.Default</span> }
+                        </label>
+                    }
+                    @if (_methods.Count > 0)
+                    {
+                        <label class="cb-choice">
+                            <input type="radio" name="@_group" value="new" checked="@(_selected == NewMethod)" @onchange="() => _selected = NewMethod" />
+                            <span>@L.UseNewPaymentMethod</span>
+                        </label>
+                    }
+                    @if (_selected == NewMethod)
+                    {
+                        <PaymentElement @ref="_payment" CheckoutHandle="@_checkout.Handle" ForOrganization="ForOrganization" />
+                    }
+                </fieldset>
+            }
+
+            <Alert Message="@GlobalError()" />
+            <Btn Type="submit" Block Busy="Busy">@ConfirmLabel</Btn>
+        </form>
+    }
+</Modal>
+
+@code {
+    private const string NewMethod = "new";
+    private readonly string _group = "cb-pm-" + Guid.NewGuid().ToString("N")[..8];
+    private BillingCheckout? _checkout;
+    private List<BillingPaymentMethod> _methods = [];
+    private string _selected = NewMethod;
+    private PaymentElement? _payment;
+    private bool _done;
+    private string? _startedKey;
+
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    [Parameter, EditorRequired] public string? PlanId { get; set; }
+    /// <summary><c>month</c> or <c>annual</c>.</summary>
+    [Parameter] public string PlanPeriod { get; set; } = "month";
+    /// <summary><c>user</c> or <c>organization</c>.</summary>
+    [Parameter] public string For { get; set; } = "user";
+    [Parameter] public string? NewSubscriptionRedirectUrl { get; set; }
+    [Parameter] public EventCallback OnSubscriptionComplete { get; set; }
+
+    private bool ForOrganization => BillingFormat.IsOrganization(For);
+    private BillingMoney? DueNow => _checkout?.Totals?.TotalDueNow ?? _checkout?.Totals?.GrandTotal;
+    private bool RequiresPayment => _checkout is not null && (_checkout.NeedsPaymentMethod || DueNow is { Amount: > 0 });
+
+    private string ConfirmLabel =>
+        _checkout?.FreeTrialEndsAt is not null && _checkout.Plan?.FreeTrialDays is { } days ? Format(L.StartTrial, days)
+        : DueNow is { Amount: > 0 } due ? Format(L.PayNow, BillingFormat.Money(due))
+        : _checkout?.IsImmediatePlanChange == true ? L.SwitchPlan
+        : L.Subscribe;
+
+    private string PeriodLabel(string? period) => period == "annual" ? L.Annually : L.Monthly;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{PlanId}|{PlanPeriod}|{For}|{Auth.OrgId}";
+        if (Open && Auth.IsSignedIn && !string.IsNullOrEmpty(PlanId) && _startedKey != key)
+        {
+            _startedKey = key;
+            await StartAsync();
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        _checkout = null;
+        _done = false;
+        _methods = [];
+        _selected = NewMethod;
+        await RunAsync(async () =>
+        {
+            var checkout = await Clerk.Billing.StartCheckoutAsync(PlanId!, PlanPeriod, ForOrganization ? Auth.OrgId : null);
+            if (checkout.NeedsPaymentMethod || (checkout.Totals?.TotalDueNow ?? checkout.Totals?.GrandTotal) is { Amount: > 0 })
+            {
+                var page = await Clerk.Billing.GetPaymentMethodsAsync(ForOrganization, 1, 50);
+                _methods = page.Data.Where(m => m.Status is null or "active").ToList();
+                _selected = (_methods.FirstOrDefault(m => m.IsDefault) ?? _methods.FirstOrDefault())?.Id ?? NewMethod;
+            }
+            _checkout = checkout;
+        });
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_checkout is null) return;
+        var checkout = _checkout;
+        var ok = await RunAsync(async () =>
+        {
+            if (!RequiresPayment) _checkout = await Clerk.Billing.ConfirmCheckoutAsync(checkout);
+            else if (_selected == NewMethod)
+            {
+                if (_payment is null) return;
+                var token = await _payment.SubmitAsync();
+                _checkout = await Clerk.Billing.ConfirmCheckoutAsync(checkout, paymentToken: token);
+            }
+            else _checkout = await Clerk.Billing.ConfirmCheckoutAsync(checkout, paymentMethodId: _selected);
+            _done = true;
+        });
+        if (ok && _done) await OnSubscriptionComplete.InvokeAsync();
+    }
+
+    private async Task ContinueAsync()
+    {
+        if (!string.IsNullOrEmpty(NewSubscriptionRedirectUrl))
+        {
+            await OnOpenChanged(false);
+            Go(NewSubscriptionRedirectUrl);
+            return;
+        }
+        await OnOpenChanged(false);
+    }
+
+    private async Task OnOpenChanged(bool open)
+    {
+        Open = open;
+        if (!open)
+        {
+            _startedKey = null;
+            _checkout = null;
+            _done = false;
+            Error = null;
+        }
+        await OpenChanged.InvokeAsync(open);
+    }
+}

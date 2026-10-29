@@ -85,3 +85,13 @@ main {
         padding-right: 1.5rem !important;
     }
 }
+
+/* Keep the template's link rules away from Clerk components rendered in the top row. */
+.top-row ::deep .cb-root a,
+.top-row.auth ::deep .cb-root a:first-child {
+    margin-left: 0;
+    flex: initial;
+    width: auto;
+    text-align: inherit;
+    overflow: visible;
+}

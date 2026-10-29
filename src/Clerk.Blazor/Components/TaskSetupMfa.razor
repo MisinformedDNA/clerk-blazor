@@ -1,0 +1,26 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-task-setup-mfa")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <Card Title="@L.TwoStepVerification" Subtitle="@L.SetupMfaTask">
+        <ChildContent>
+            @if (State.Session is null) { <p>@(State.IsLoaded ? L.UserSignInRequired : L.Loading)</p> }
+            else { <UserMfaSettings TaskMode="true" OnComplete="CompleteAsync" /> }
+            <Alert Message="@GlobalError()" />
+        </ChildContent>
+        <Footer><button type="button" class="cb-link" disabled="@Busy" @onclick="SignOutAsync">@L.SignOut</button></Footer>
+    </Card>
+</div>
+
+@code {
+    [Parameter] public string? RedirectUrlComplete { get; set; }
+    [Parameter] public EventCallback OnComplete { get; set; }
+    private async Task CompleteAsync()
+    {
+        if (State.Session is not { } session) return;
+        // Propagate activation errors to the setup flow so Continue remains retryable.
+        await Clerk.SetActiveAsync(new SetActiveOptions { SessionId = session.Id, RedirectUrl = RedirectUrlComplete ?? Clerk.Options.SignInFallbackRedirectUrl });
+        await OnComplete.InvokeAsync();
+    }
+    private Task<bool> SignOutAsync() => RunAsync(() => Clerk.SignOutAsync(State.Session?.Id));
+}

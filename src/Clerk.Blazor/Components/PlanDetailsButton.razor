@@ -1,0 +1,27 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@using Clerk.Blazor.Internal
+
+@* Opens the plan details drawer (<PlanDetailsButton />). *@
+@if (ChildContent is not null)
+{
+    <span class="cb-trigger" @onclick="() => _open = true" @attributes="AdditionalAttributes">@ChildContent</span>
+}
+else
+{
+    <button type="button" class="@RootClass("cb-btn cb-btn--outline")" style="@RootStyle" data-cb-theme="@ThemeAttr" @onclick="() => _open = true" @attributes="AdditionalAttributes">@L.BillingPlanDetails</button>
+}
+<PlanDetailsDrawer @bind-Open="_open" PlanId="@PlanId" Plan="@Plan" InitialPlanPeriod="@InitialPlanPeriod" Class="@DrawerClass" />
+
+@code {
+    private bool _open;
+
+    /// <summary>Plan to show. Either <see cref="PlanId"/> or <see cref="Plan"/> is required.</summary>
+    [Parameter] public string? PlanId { get; set; }
+    [Parameter] public BillingPlan? Plan { get; set; }
+    /// <summary><c>month</c> (default) or <c>annual</c>.</summary>
+    [Parameter] public string InitialPlanPeriod { get; set; } = "month";
+    /// <summary>Extra CSS class for the drawer.</summary>
+    [Parameter] public string? DrawerClass { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

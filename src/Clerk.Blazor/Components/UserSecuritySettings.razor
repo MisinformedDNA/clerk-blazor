@@ -1,0 +1,132 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-user-security")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (State.User is { } user)
+    {
+        @if (user.PasswordEnabled || Env.Attribute("password").Enabled)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.Password</h2><div class="cb-section__body">
+                @if (_editingPassword)
+                {
+                    <form class="cb-form" @onsubmit="SavePasswordAsync" @onsubmit:preventDefault>
+                        @if (user.PasswordEnabled)
+                        { <Field Label="@L.CurrentPassword" Type="password" @bind-Value="_currentPassword" Autocomplete="current-password" Required Disabled="Busy" ShowLabel="@L.ShowPassword" HideLabel="@L.HidePassword" /> }
+                        <Field Label="@L.NewPassword" Type="password" @bind-Value="_newPassword" Autocomplete="new-password" Required Disabled="Busy" ShowLabel="@L.ShowPassword" HideLabel="@L.HidePassword" />
+                        <Field Label="@L.ConfirmPassword" Type="password" @bind-Value="_confirmPassword" Autocomplete="new-password" Required Disabled="Busy" ShowLabel="@L.ShowPassword" HideLabel="@L.HidePassword" />
+                        <label class="cb-check"><input type="checkbox" @bind="_signOutOthers" disabled="@Busy" />@L.SignOutOtherSessions</label>
+                        <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="CancelPassword">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Save</Btn></div>
+                    </form>
+                }
+                else
+                { <button type="button" class="cb-link" disabled="@Busy" @onclick="() => BeginPasswordEdit(false)">@(user.PasswordEnabled ? L.UpdatePassword : L.SetPassword)</button> }
+                @if (CanRemovePassword(user))
+                {
+                    @if (_removingPassword)
+                    {
+                        <form class="cb-form" @onsubmit="RemovePasswordAsync" @onsubmit:preventDefault>
+                            <Field Label="@L.CurrentPassword" Type="password" @bind-Value="_currentPassword" Autocomplete="current-password" Required Disabled="Busy" ShowLabel="@L.ShowPassword" HideLabel="@L.HidePassword" />
+                            <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="CancelPassword">@L.Cancel</Btn><Btn Type="submit" Variant="danger-outline" Busy="Busy">@L.RemovePassword</Btn></div>
+                        </form>
+                    }
+                    else { <button type="button" class="cb-link cb-link--danger" disabled="@Busy" @onclick="() => BeginPasswordEdit(true)">@L.RemovePassword</button> }
+                }
+                @if (_passwordSaved) { <p role="status">@L.UserPasswordUpdated</p> }
+            </div></section>
+        }
+        @if (Env.Attribute("passkey").Enabled)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.Passkeys</h2><div class="cb-section__body">
+                <ul class="cb-list">
+                    @foreach (var passkey in user.Passkeys)
+                    {
+                        <li class="cb-list__item" @key="passkey.Id"><div class="cb-list__main"><span>@(passkey.Name ?? L.Passkeys)</span></div>
+                            <div class="cb-list__actions"><button type="button" class="cb-link" disabled="@Busy" @onclick="() => EditPasskey(passkey)">@L.Rename</button><UserConfirmAction Label="@L.Remove" Disabled="Busy" OnConfirm="() => RunAsync(() => Clerk.User.RemovePasskeyAsync(passkey.Id))" /></div>
+                        </li>
+                    }
+                </ul>
+                @if (_passkeyId is not null)
+                {
+                    <form class="cb-form" @onsubmit="RenamePasskeyAsync" @onsubmit:preventDefault>
+                        <Field Label="@L.UserPasskeyName" @bind-Value="_passkeyName" Required Disabled="Busy" />
+                        <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="() => _passkeyId = null">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Save</Btn></div>
+                    </form>
+                }
+                <button type="button" class="cb-link" disabled="@Busy" @onclick="() => RunAsync(async () => { await Clerk.User.CreatePasskeyAsync(); })">@L.AddPasskey</button>
+            </div></section>
+        }
+        <section class="cb-section"><h2 class="cb-section__title">@L.TwoStepVerification</h2><div class="cb-section__body"><UserMfaSettings /></div></section>
+        <section class="cb-section"><h2 class="cb-section__title">@L.ActiveDevices</h2><div class="cb-section__body">
+            @if (_sessions is null) { <p role="status">@L.Loading</p> }
+            else if (_sessions.Count == 0) { <p class="cb-empty">@L.NoResults</p> }
+            else
+            {
+                <ul class="cb-list">
+                    @foreach (var session in _sessions)
+                    {
+                        <li class="cb-list__item" @key="session.Id">
+                            <div class="cb-list__main"><div class="cb-person__text">
+                                <span class="cb-person__name">@(session.LatestActivity?.BrowserName ?? L.UserDevice) @session.LatestActivity?.BrowserVersion</span>
+                                <span class="cb-person__sub">@session.LatestActivity?.DeviceType</span>
+                                <span class="cb-person__sub">@session.LatestActivity?.IpAddress @session.LatestActivity?.City @session.LatestActivity?.Country</span>
+                                @if (session.LastActiveAt is { } active) { <span class="cb-person__sub">@Format(L.UserLastActive, active.ToLocalTime().ToString("g"))</span> }
+                            </div>
+                            @if (session.Id == State.Session?.Id) { <span class="cb-badge cb-badge--primary">@L.ThisDevice</span> }
+                            </div>
+                            @if (session.Id != State.Session?.Id) { <UserConfirmAction Label="@L.SignOutDevice" Disabled="Busy" OnConfirm="() => RevokeAsync(session)" /> }
+                        </li>
+                    }
+                </ul>
+            }
+            <button type="button" class="cb-link" disabled="@Busy" @onclick="LoadSessionsAsync">@L.UserRefreshDevices</button>
+        </div></section>
+        @if (user.DeleteSelfEnabled)
+        {
+            <section class="cb-section cb-section--danger"><h2 class="cb-section__title">@L.DeleteAccount</h2><div class="cb-section__body">
+                <p>@L.DeleteAccountWarning</p>
+                <form class="cb-form" @onsubmit="DeleteAsync" @onsubmit:preventDefault>
+                    <Field Label="@Format(L.TypeToConfirm, L.DeleteAccount)" @bind-Value="_deleteConfirmation" Autocomplete="off" Disabled="Busy" />
+                    <Btn Type="submit" Variant="danger-outline" Busy="Busy" Disabled="@(_deleteConfirmation != L.DeleteAccount)">@L.DeleteAccount</Btn>
+                </form>
+            </div></section>
+        }
+    }
+    <Alert Message="@GlobalError()" />
+</div>
+
+@code {
+    private bool _editingPassword, _removingPassword, _passwordSaved;
+    private bool _signOutOthers = true;
+    private string _currentPassword = "", _newPassword = "", _confirmPassword = "", _deleteConfirmation = "", _passkeyName = "";
+    private string? _passkeyId;
+    private IReadOnlyList<ClerkUserSession>? _sessions;
+    protected override async Task OnInitializedAsync() => await LoadSessionsAsync();
+    private async Task LoadSessionsAsync() { if (!await RunAsync(async () => { _sessions = await Clerk.User.GetSessionsAsync(); })) _sessions ??= []; }
+    private bool CanRemovePassword(ClerkUser user) => user.PasswordEnabled && !Env.Attribute("password").Required &&
+        (user.ExternalAccounts.Any(a => a.Verification?.IsVerified == true) || user.Passkeys.Count > 0 ||
+         (Env.Attribute("email_address").UsedForFirstFactor && user.EmailAddresses.Any(e => e.Verification?.IsVerified == true)) ||
+         (Env.Attribute("phone_number").UsedForFirstFactor && user.PhoneNumbers.Any(p => p.Verification?.IsVerified == true)) ||
+         user.Web3Wallets.Any(w => w.Verification?.IsVerified == true));
+    private void BeginPasswordEdit(bool remove) { CancelPassword(); _passwordSaved = false; _editingPassword = !remove; _removingPassword = remove; }
+    private void CancelPassword() { _editingPassword = false; _removingPassword = false; _currentPassword = ""; _newPassword = ""; _confirmPassword = ""; Error = null; }
+    private async Task SavePasswordAsync()
+    {
+        if (await RunAsync(async () =>
+        {
+            if (_newPassword != _confirmPassword) throw new ClerkException("password_mismatch", L.PasswordsDoNotMatch);
+            await Clerk.User.UpdatePasswordAsync(_newPassword, State.User!.PasswordEnabled ? _currentPassword : null, _signOutOthers);
+        })) { CancelPassword(); _passwordSaved = true; }
+    }
+    private async Task RemovePasswordAsync() { if (await RunAsync(() => Clerk.User.RemovePasswordAsync(_currentPassword))) CancelPassword(); }
+    private void EditPasskey(ClerkPasskey passkey) { _passkeyId = passkey.Id; _passkeyName = passkey.Name ?? ""; Error = null; }
+    private async Task RenamePasskeyAsync() { if (_passkeyId is not null && await RunAsync(() => Clerk.User.RenamePasskeyAsync(_passkeyId, _passkeyName.Trim()))) _passkeyId = null; }
+    private Task<bool> RevokeAsync(ClerkUserSession session) => RunAsync(async () => { await Clerk.User.RevokeSessionAsync(session); _sessions = _sessions?.Where(s => s.Id != session.Id).ToArray(); });
+    private Task<bool> DeleteAsync() => RunAsync(async () =>
+    {
+        if (_deleteConfirmation != L.DeleteAccount) return;
+        await Clerk.User.DeleteAsync();
+        _deleteConfirmation = "";
+        Go(Clerk.Options.AfterSignOutUrl);
+    });
+    public override void Dispose() { _currentPassword = ""; _newPassword = ""; _confirmPassword = ""; base.Dispose(); }
+}

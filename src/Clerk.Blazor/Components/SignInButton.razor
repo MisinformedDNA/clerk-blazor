@@ -3,7 +3,7 @@
 
 @if (ChildContent is not null)
 {
-    <span class="cb-trigger" @onclick="OpenAsync" @attributes="AdditionalAttributes">@ChildContent</span>
+    <button type="button" class="cb-trigger cb-trigger--bare" @onclick="OpenAsync" @attributes="AdditionalAttributes">@ChildContent</button>
 }
 else
 {

@@ -1,0 +1,142 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-create-organization")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <Card Title="@(_inviting ? L.InviteMembers : L.CreateOrganization)" Subtitle="@(_inviting ? L.InviteHint : L.OrgCreationSubtitle)">
+        <Alert Message="@GlobalError("name", "slug", "email_addresses")" />
+        @if (!State.IsLoaded || State.User is null)
+        {
+            <p class="cb-empty" role="status">@L.Loading</p>
+        }
+        else if (_inviting)
+        {
+            <form class="cb-form" @onsubmit="InviteAsync" @onsubmit:preventDefault>
+                <Field Label="@L.OrgEmails" @bind-Value="_emails" Required="true" Disabled="@Busy" Error="@FieldError("email_addresses")" Hint="@L.InviteHint" />
+                <label class="cb-field"><span class="cb-field__label">@L.Role</span><select class="cb-input" @bind="_role" disabled="@Busy">@foreach (var role in _roles) { <option value="@role.Key">@role.Name</option> }</select></label>
+                <Btn Type="submit" Busy="@Busy" Disabled="@(string.IsNullOrWhiteSpace(_emails) || string.IsNullOrEmpty(_role))" Block="true">@L.SendInvitations</Btn>
+                <Btn Variant="ghost" Disabled="@Busy" OnClick="CompleteAsync">@L.OrgSkipInvitations</Btn>
+            </form>
+        }
+        else if (!CanCreate && _created is null)
+        {
+            <p class="cb-empty">@L.OrgCreationUnavailable</p>
+        }
+        else
+        {
+            @if (_advisory) { <Alert Kind="warning" Message="@L.OrgCreationAdvisory" /> }
+            <form class="cb-form" @onsubmit="CreateAsync" @onsubmit:preventDefault>
+                <Field Label="@L.OrganizationName" Value="@_name" ValueChanged="NameChanged" Required="true" Disabled="@(Busy || _created is not null)" Error="@FieldError("name")" AutoFocus="true" />
+                @if (!HideSlug && !Env.Organizations.SlugDisabled)
+                {
+                    <Field Label="@L.OrganizationSlug" Value="@_slug" ValueChanged="SlugChanged" Disabled="@(Busy || _created is not null)" Error="@FieldError("slug")" />
+                }
+                @if (!string.IsNullOrEmpty(_suggestedLogo)) { <Avatar Name="@_name" ImageUrl="@_suggestedLogo" Size="56" Shape="square" /> }
+                <label class="cb-field"><span class="cb-field__label">@L.OrgLogo</span><input class="cb-input" type="file" accept="image/*" @ref="_logo" @onchange="e => _hasLogo = !string.IsNullOrEmpty(e.Value?.ToString())" disabled="@Busy" /></label>
+                <Btn Type="submit" Busy="@Busy" Disabled="@string.IsNullOrWhiteSpace(_name)" Block="true">@(_created is null ? L.CreateOrganization : L.Continue)</Btn>
+            </form>
+        }
+    </Card>
+</div>
+
+@code {
+    /// <summary>Path routing requires a host catch-all route; use Virtual for inline or modal flows.</summary>
+    [Parameter] public ClerkRouting Routing { get; set; } = ClerkRouting.Path;
+    [Parameter] public string? Path { get; set; }
+    /// <summary>Completion destination. Supports :id and :slug placeholders; when omitted, OnComplete or the sign-in fallback handles completion.</summary>
+    [Parameter] public string? AfterCreateOrganizationUrl { get; set; }
+    [Parameter] public bool SkipInvitationScreen { get; set; }
+    [Parameter] public bool HideSlug { get; set; }
+    [Parameter] public EventCallback<ClerkOrganization> OnComplete { get; set; }
+    private string _name = "", _slug = "", _emails = "", _role = "";
+    private string? _suggestedLogo;
+    private bool _slugEdited, _hasLogo, _inviting, _advisory, _defaultsLoaded;
+    private ElementReference _logo;
+    private ClerkOrganization? _created;
+    private IReadOnlyList<OrganizationRole> _roles = [];
+    private bool CanCreate => Env.Organizations.Enabled && State.User?.CreateOrganizationEnabled == true;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Navigation.LocationChanged += LocationChanged;
+    }
+    private void LocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        if (Routing != ClerkRouting.Path) return;
+        _ = InvokeAsync(() => {
+            var invitePath = Navigation.ToAbsoluteUri((Path ?? Clerk.Options.CreateOrganizationUrl).TrimEnd('/') + "/invite-members").AbsolutePath.TrimEnd('/');
+            _inviting = _created is not null && Navigation.ToAbsoluteUri(args.Location).AbsolutePath.TrimEnd('/').Equals(invitePath, StringComparison.OrdinalIgnoreCase);
+            StateHasChanged();
+        });
+    }
+    protected override async Task OnInitializedAsync() => await LoadDefaultsAsync();
+    protected override void OnClerkStateChanged(ClerkState state)
+    {
+        base.OnClerkStateChanged(state);
+        if (!_defaultsLoaded && state.User is not null) _ = InvokeAsync(LoadDefaultsAsync);
+    }
+    private async Task LoadDefaultsAsync()
+    {
+        if (_defaultsLoaded || State.User is null) return;
+        _defaultsLoaded = true;
+        var invitePath = Navigation.ToAbsoluteUri((Path ?? Clerk.Options.CreateOrganizationUrl).TrimEnd('/') + "/invite-members").AbsolutePath.TrimEnd('/');
+        if (Routing == ClerkRouting.Path && Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/').Equals(invitePath, StringComparison.OrdinalIgnoreCase) && State.Organization is { } current && Auth.Has(permission: "org:sys_memberships:manage")) {
+            _created = current; _name = current.Name; _slug = current.Slug ?? ""; _inviting = true;
+            await RunAsync(LoadRolesAsync);
+            return;
+        }
+        if (!Env.Organizations.CreationDefaultsEnabled) return;
+        await RunAsync(async () => {
+            var defaults = await Clerk.Organization.GetCreationDefaultsAsync();
+            if (string.IsNullOrWhiteSpace(_name)) _name = defaults.Form?.Name ?? "";
+            if (!_slugEdited) _slug = defaults.Form?.Slug ?? OrganizationUi.Slug(_name);
+            _suggestedLogo = defaults.Form?.Logo;
+            _advisory = defaults.Advisory is not null;
+        });
+    }
+    private void NameChanged(string value) { _name = value; if (!_slugEdited) _slug = OrganizationUi.Slug(value); }
+    private void SlugChanged(string value) { _slugEdited = true; _slug = value; }
+    private async Task CreateAsync()
+    {
+        if ((!CanCreate && _created is null) || string.IsNullOrWhiteSpace(_name)) return;
+        var ok = await RunAsync(async () => {
+            _created ??= await Clerk.Organization.CreateAsync(_name.Trim(), HideSlug || Env.Organizations.SlugDisabled ? null : _slug);
+            await Clerk.Organization.SetActiveAsync(_created.Id);
+            if (_hasLogo) { await Clerk.Organization.SetLogoAsync(_logo); _hasLogo = false; }
+            else if (!string.IsNullOrEmpty(_suggestedLogo)) {
+                await Clerk.InvokeAsync("organization.setLogo", new Dictionary<string, object?> { ["file"] = _suggestedLogo });
+                _suggestedLogo = null;
+            }
+            if (!SkipInvitationScreen && (_created.MaxAllowedMemberships == 0 || _created.MembersCount < _created.MaxAllowedMemberships) && Auth.Has(permission: "org:sys_memberships:manage")) {
+                await LoadRolesAsync();
+                _inviting = true;
+            }
+        });
+        if (ok && !_inviting) await CompleteAsync();
+        else if (ok && Routing == ClerkRouting.Path) Go((Path ?? Clerk.Options.CreateOrganizationUrl).TrimEnd('/') + "/invite-members" + Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+    }
+    private async Task LoadRolesAsync()
+    {
+        _roles = await Clerk.Organization.GetRolesAsync();
+        _role = _roles.FirstOrDefault(r => r.Key == "org:member")?.Key ?? _roles.FirstOrDefault()?.Key ?? "";
+    }
+    private async Task InviteAsync()
+    {
+        if (_created?.Id != State.Organization?.Id || !Auth.Has(permission: "org:sys_memberships:manage")) return;
+        var emails = OrganizationUi.Emails(_emails);
+        if (emails.Length == 0 || string.IsNullOrEmpty(_role)) return;
+        if (await RunAsync(() => Clerk.Organization.InviteMembersAsync(emails, _role))) await CompleteAsync();
+    }
+    public override void Dispose() { Navigation.LocationChanged -= LocationChanged; base.Dispose(); }
+    private async Task CompleteAsync()
+    {
+        if (_created is null) return;
+        await OnComplete.InvokeAsync(_created);
+        var template = AfterCreateOrganizationUrl;
+        if (template is null && OrganizationUi.Query(Navigation.ToAbsoluteUri(Navigation.Uri), "after_create_organization_url") is { Length: > 0 } query)
+            template = Clerk.ResolveRedirect(query, Clerk.Options.SignInFallbackRedirectUrl);
+        var url = OrganizationUi.Url(template, _created.Id, _created.Slug);
+        if (url is not null) Go(url);
+        else if (!OnComplete.HasDelegate) Go(Clerk.Options.SignInFallbackRedirectUrl);
+    }
+}

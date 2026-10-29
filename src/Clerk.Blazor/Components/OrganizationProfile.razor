@@ -1,0 +1,199 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-profile cb-organization-profile")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <CascadingValue Value="_registration" IsFixed="true">
+        <span hidden>@CustomPages</span>
+        <nav class="cb-profile__nav" aria-label="@L.OrgProfile">
+            <h2 class="cb-profile__nav-title">@L.OrgProfile</h2>
+            <p class="cb-profile__nav-subtitle">@State.Organization?.Name</p>
+            <div class="cb-organization-profile__tabs" role="tablist" aria-label="@L.OrgProfile">
+                @foreach (var tab in Tabs)
+                {
+                    <button id="@TabId(tab.Key)" type="button" class="cb-profile__tab" role="tab" aria-selected="@(_tab == tab.Key ? "true" : "false")" aria-controls="@_panelId" tabindex="@(_tab == tab.Key ? 0 : -1)" @ref="_tabElements[tab.Key]" disabled="@Busy" @onkeydown="e => TabKeyAsync(e, tab.Key, false)" @onclick="() => SelectTabAsync(tab.Key)">@tab.Icon @tab.Label</button>
+                }
+            </div>
+            @foreach (var link in _registration.Links)
+            {
+                <a class="cb-profile__tab" href="@link.Url">@link.Icon @link.Label</a>
+            }
+        </nav>
+        <main class="cb-profile__main">
+            <Alert Message="@GlobalError("name", "slug", "email_addresses", "affiliation_email_address", "code")" />
+            @if (State.Organization is not { } org)
+            {
+                <p class="cb-empty">@L.OrgSelectFirst</p>
+            }
+            else if (_loading || org.Id != _orgId)
+            {
+                <p class="cb-empty" role="status">@L.Loading</p>
+            }
+            else
+            {
+                <div id="@_panelId" role="tabpanel" aria-labelledby="@TabId(_tab)">
+                    @if (_tab == "general")
+                    {
+                        <h2 class="cb-profile__title">@L.General</h2>
+                        <section class="cb-section">
+                            <h3 class="cb-section__title">@L.OrgProfile</h3>
+                            <div class="cb-section__body">
+                                <div class="cb-person"><Avatar ImageUrl="@org.ImageUrl" Name="@org.Name" Size="56" Shape="square" /><span>@org.Name</span></div>
+                                @if (CanProfile)
+                                {
+                                    <form class="cb-form" @onsubmit="SaveProfileAsync" @onsubmit:preventDefault>
+                                        <label class="cb-field"><span class="cb-field__label">@L.OrgLogo</span><input type="file" class="cb-input" accept="image/*" @ref="_logo" @onchange="UploadLogoAsync" disabled="@Busy" /></label>
+                                        @if (org.HasImage) { <Btn Variant="ghost" Disabled="@Busy" OnClick="RemoveLogoAsync">@L.Remove</Btn> }
+                                        <Field Label="@L.OrganizationName" @bind-Value="_name" Required="true" Disabled="@Busy" Error="@FieldError("name")" />
+                                        @if (!Env.Organizations.SlugDisabled) { <Field Label="@L.OrganizationSlug" @bind-Value="_slug" Disabled="@Busy" Error="@FieldError("slug")" /> }
+                                        <div class="cb-actions"><Btn Type="submit" Busy="@Busy" Disabled="@string.IsNullOrWhiteSpace(_name)">@L.Save</Btn></div>
+                                    </form>
+                                }
+                            </div>
+                        </section>
+                        @if (Env.Organizations.DomainsEnabled && CanReadDomains)
+                        {
+                            <section class="cb-section">
+                                <h3 class="cb-section__title">@L.Domains</h3>
+                                <div class="cb-section__body">
+                                    @if (_domains.Data.Count == 0) { <p class="cb-empty">@L.OrgNoDomains</p> }
+                                    <ul class="cb-list">
+                                        @foreach (var domain in _domains.Data)
+                                        {
+                                            <li @key="domain.Id" class="cb-list__item cb-organization-profile__domain">
+                                                <div class="cb-list__main"><span>@domain.Name</span><span class="cb-badge">@(domain.Verification?.Status == "verified" ? L.OrgVerified : L.OrgUnverified)</span></div>
+                                                @if (CanDomains)
+                                                {
+                                                    <div class="cb-list__actions">
+                                                        @if (domain.Verification?.Status != "verified") { <Btn Variant="ghost" Disabled="@Busy" OnClick="() => StartVerification(domain)">@L.Verify</Btn> }
+                                                        <Btn Variant="danger-outline" Disabled="@Busy" OnClick="() => _removeDomain = domain.Id">@L.Remove</Btn>
+                                                    </div>
+                                                    @if (domain.Verification?.Status == "verified")
+                                                    {
+                                                        <label class="cb-field"><span class="cb-field__label">@L.OrgEnrollment</span><select class="cb-input" @bind:get="EnrollmentValue(domain)" @bind:set="mode => EnrollmentAsync(domain, mode)" disabled="@Busy">
+                                                            @foreach (var mode in EnrollmentModes) { <option value="@mode">@EnrollmentLabel(mode)</option> }
+                                                        </select></label>
+                                                    }
+                                                    @if (_removeDomain == domain.Id)
+                                                    {
+                                                        <div class="cb-form"><p>@Format(L.OrgRemoveDomainWarning, domain.Name)</p><div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="() => _removeDomain = null">@L.Cancel</Btn><Btn Variant="danger-outline" Busy="@Busy" OnClick="() => DeleteDomainAsync(domain)">@L.Remove</Btn></div></div>
+                                                    }
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                    <Pager Page="@_domainPage" PageSize="10" TotalCount="@_domains.TotalCount" PageChanged="DomainPageAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+                                    @if (CanDomains)
+                                    {
+                                        @if (_verifying is { } verifying)
+                                        {
+                                            <form class="cb-form" @onsubmit="VerifyDomainAsync" @onsubmit:preventDefault>
+                                                <p>@verifying.Name</p>
+                                                @if (!_codeSent) { <Field Label="@L.OrgAffiliationEmail" Type="email" @bind-Value="_affiliationEmail" Required="true" Error="@FieldError("affiliation_email_address")" Disabled="@Busy" /> }
+                                                else { <Field Label="@L.Code" @bind-Value="_code" Required="true" Autocomplete="one-time-code" Error="@FieldError("code")" Disabled="@Busy" /> }
+                                                <div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="CancelVerification">@L.Cancel</Btn><Btn Type="submit" Busy="@Busy">@(_codeSent ? L.Verify : L.OrgSendCode)</Btn></div>
+                                            </form>
+                                        }
+                                        else
+                                        {
+                                            <form class="cb-form" @onsubmit="AddDomainAsync" @onsubmit:preventDefault><Field Label="@L.OrgDomainName" @bind-Value="_domainName" Required="true" Disabled="@Busy" Error="@FieldError("name")" /><div class="cb-actions"><Btn Type="submit" Busy="@Busy" Disabled="@string.IsNullOrWhiteSpace(_domainName)">@L.AddDomain</Btn></div></form>
+                                        }
+                                    }
+                                </div>
+                            </section>
+                        }
+                        <section class="cb-section cb-section--danger">
+                            <h3 class="cb-section__title">@L.LeaveOrganization</h3>
+                            <div class="cb-section__body">
+                                <p>@L.OrgLeaveWarning</p>
+                                @if (_confirmLeave)
+                                {
+                                    <div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="() => _confirmLeave = false">@L.Cancel</Btn><Btn Variant="danger-outline" Busy="@Busy" OnClick="LeaveAsync">@L.LeaveOrganization</Btn></div>
+                                }
+                                else { <div class="cb-actions"><Btn Variant="danger-outline" Disabled="@Busy" OnClick="() => _confirmLeave = true">@L.LeaveOrganization</Btn></div> }
+                            </div>
+                        </section>
+                        @if (CanDelete)
+                        {
+                            <section class="cb-section cb-section--danger"><h3 class="cb-section__title">@L.DeleteOrganization</h3><div class="cb-section__body">
+                                <p>@L.OrgDeleteWarning</p>
+                                <Field Label="@Format(L.TypeToConfirm, org.Name)" @bind-Value="_deleteName" Disabled="@Busy" />
+                                <div class="cb-actions"><Btn Variant="danger-outline" Busy="@Busy" Disabled="@(_deleteName != org.Name)" OnClick="DeleteAsync">@L.DeleteOrganization</Btn></div>
+                            </div></section>
+                        }
+                    }
+                    else if (_tab == "members")
+                    {
+                        <h2 class="cb-profile__title">@L.Members</h2>
+                        <div class="cb-tabs" role="tablist" aria-label="@L.Members">
+                            @foreach (var memberTab in MemberTabs)
+                            {
+                                <button id="@TabId("members-" + memberTab.Key)" type="button" class="cb-tab" role="tab" aria-selected="@(_memberTab == memberTab.Key ? "true" : "false")" aria-controls="@(_panelId + "-members")" tabindex="@(_memberTab == memberTab.Key ? 0 : -1)" @ref="_memberTabElements[memberTab.Key]" disabled="@Busy" @onkeydown="e => TabKeyAsync(e, memberTab.Key, true)" @onclick="() => SelectMemberTabAsync(memberTab.Key)">@memberTab.Label</button>
+                            }
+                        </div>
+                        <div id="@(_panelId + "-members")" role="tabpanel" aria-labelledby="@TabId("members-" + _memberTab)">
+                        @if (_memberTab == "members")
+                        {
+                            <form class="cb-toolbar" @onsubmit="SearchAsync" @onsubmit:preventDefault><label class="cb-field"><span class="cb-field__label">@L.OrgSearchMembers</span><input class="cb-input" type="search" @bind="_query" disabled="@Busy" /></label><Btn Type="submit" Busy="@Busy">@L.Search</Btn></form>
+                            @if (_members.Data.Count == 0) { <p class="cb-empty">@L.OrgNoMembers</p> }
+                            else
+                            {
+                                <div class="cb-table-wrap"><table class="cb-table"><thead><tr><th scope="col">@L.OrgMember</th><th scope="col">@L.Joined</th><th scope="col">@L.Role</th>@if (CanMembers) { <th scope="col">@L.OrgActions</th> }</tr></thead><tbody>
+                                @foreach (var member in _members.Data)
+                                {
+                                    var user = member.PublicUserData;
+                                    var self = user?.UserId == State.User?.Id;
+                                    <tr @key="member.Id"><td><div class="cb-person"><Avatar ImageUrl="@user?.ImageUrl" Name="@user?.DisplayName" /><span class="cb-person__text"><span class="cb-person__name">@user?.DisplayName</span><span class="cb-person__sub">@user?.Identifier</span></span></div></td><td>@member.CreatedAt?.ToString("d", System.Globalization.CultureInfo.CurrentCulture)</td>
+                                    <td>@if (CanMembers && !self && user?.UserId is not null) {
+                                        <select class="cb-input" @bind:get="member.Role" @bind:set="role => UpdateMemberAsync(member, role)" aria-label="@Format(L.OrgMemberRole, user.DisplayName)" disabled="@Busy">
+                                            @if (!_roles.Any(r => r.Key == member.Role)) { <option value="@member.Role">@(member.RoleName ?? member.Role)</option> }
+                                            @foreach (var role in _roles) { <option value="@role.Key">@role.Name</option> }
+                                        </select>
+                                    } else { @(member.RoleName ?? member.Role) }</td>
+                                    @if (CanMembers) { <td>@if (!self && user?.UserId is not null) {
+                                        @if (_removeMember == member.Id) {
+                                            <p>@Format(L.OrgRemoveMemberWarning, user.DisplayName)</p><div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="() => _removeMember = null">@L.Cancel</Btn><Btn Variant="danger-outline" Busy="@Busy" OnClick="() => RemoveMemberAsync(member)">@L.Remove</Btn></div>
+                                        } else { <Btn Variant="danger-outline" Disabled="@Busy" OnClick="() => _removeMember = member.Id">@L.Remove</Btn> }
+                                    }</td> }</tr>
+                                }
+                                </tbody></table></div>
+                            }
+                            <Pager Page="@_memberPage" PageSize="10" TotalCount="@_members.TotalCount" PageChanged="MemberPageAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+                        }
+                        else if (_memberTab == "invitations" && CanMembers)
+                        {
+                            <form class="cb-form cb-organization-profile__invite" @onsubmit="InviteAsync" @onsubmit:preventDefault>
+                                <Field Label="@L.OrgEmails" @bind-Value="_emails" Required="true" Hint="@L.InviteHint" Error="@FieldError("email_addresses")" Disabled="@(Busy || AtMemberLimit)" />
+                                <label class="cb-field"><span class="cb-field__label">@L.Role</span><select class="cb-input" @bind="_inviteRole" disabled="@(Busy || AtMemberLimit)">@foreach (var role in _roles) { <option value="@role.Key">@role.Name</option> }</select></label>
+                                @if (AtMemberLimit) { <Alert Kind="warning" Message="@L.OrgMemberLimit" /> }
+                                <Alert Kind="success" Message="@(_invitesSent ? L.OrgInvitationsSent : null)" />
+                                <div class="cb-actions"><Btn Type="submit" Busy="@Busy" Disabled="@(AtMemberLimit || string.IsNullOrWhiteSpace(_emails) || string.IsNullOrEmpty(_inviteRole))">@L.SendInvitations</Btn></div>
+                            </form>
+                            @if (_invitations.Data.Count == 0) { <p class="cb-empty">@L.OrgNoInvitations</p> }
+                            <ul class="cb-list">@foreach (var invitation in _invitations.Data) {
+                                <li @key="invitation.Id" class="cb-list__item"><div class="cb-person__text"><span>@invitation.EmailAddress</span><span class="cb-person__sub">@(invitation.RoleName ?? invitation.Role)</span></div>
+                                @if (_revokeInvitation == invitation.Id) { <div class="cb-form"><p>@Format(L.OrgRevokeWarning, invitation.EmailAddress)</p><div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="() => _revokeInvitation = null">@L.Cancel</Btn><Btn Variant="danger-outline" Busy="@Busy" OnClick="() => RevokeAsync(invitation)">@L.Revoke</Btn></div></div> }
+                                else { <Btn Variant="ghost" Disabled="@Busy" OnClick="() => _revokeInvitation = invitation.Id">@L.Revoke</Btn> }</li>
+                            }</ul>
+                            <Pager Page="@_invitationPage" PageSize="10" TotalCount="@_invitations.TotalCount" PageChanged="InvitationPageAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+                        }
+                        else if (_memberTab == "requests" && CanMembers)
+                        {
+                            @if (_requests.Data.Count == 0) { <p class="cb-empty">@L.OrgNoRequests</p> }
+                            <ul class="cb-list">@foreach (var request in _requests.Data) {
+                                <li @key="request.Id" class="cb-list__item"><div class="cb-person"><Avatar Name="@request.PublicUserData?.DisplayName" ImageUrl="@request.PublicUserData?.ImageUrl" /><span class="cb-person__text"><span>@request.PublicUserData?.DisplayName</span><span class="cb-person__sub">@request.PublicUserData?.Identifier</span></span></div><div class="cb-list__actions">@if (_rejectRequest == request.Id) {
+                                    <div class="cb-form"><p>@Format(L.OrgRejectWarning, request.PublicUserData?.DisplayName)</p><div class="cb-actions"><Btn Variant="ghost" Disabled="@Busy" OnClick="() => _rejectRequest = null">@L.Cancel</Btn><Btn Variant="danger-outline" Busy="@Busy" OnClick="() => RequestAsync(request, false)">@L.Reject</Btn></div></div>
+                                } else { <Btn Variant="ghost" Disabled="@Busy" OnClick="() => _rejectRequest = request.Id">@L.Reject</Btn><Btn Busy="@Busy" OnClick="() => RequestAsync(request, true)">@L.Accept</Btn> }</div></li>
+                            }</ul>
+                            <Pager Page="@_requestPage" PageSize="10" TotalCount="@_requests.TotalCount" PageChanged="RequestPageAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+                        }
+                        else { <p class="cb-empty">@L.OrgPermissionRequired</p> }
+                        </div>
+                    }
+                    else if (_tab == "billing") { @BillingContent }
+                    else if (_tab == "api-keys") { @ApiKeysContent }
+                    else { @_registration.Pages.FirstOrDefault(p => p.Url == _tab)?.ChildContent }
+                </div>
+            }
+        </main>
+    </CascadingValue>
+</div>

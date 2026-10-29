@@ -1,0 +1,105 @@
+@namespace Clerk.Blazor.Internal
+@inherits Clerk.Blazor.Components.ClerkComponentBase
+
+@* Plan details drawer (<PlanDetails />): price, billing period and full feature list. *@
+<Modal Open="Open" OpenChanged="OnOpenChanged" Drawer Title="@L.BillingPlanDetails" CloseLabel="@L.Close" Class="@($"cb-plan-details {Class}")">
+    @if (_plan is null)
+    {
+        @if (Error is null)
+        {
+            <div class="cb-center" role="status"><span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>
+        }
+        else
+        {
+            <Alert Message="@GlobalError()" />
+        }
+    }
+    else
+    {
+        <div class="cb-stack">
+            <div class="cb-plan__head">
+                @if (!string.IsNullOrEmpty(_plan.AvatarUrl)) { <Avatar ImageUrl="@_plan.AvatarUrl" Name="@_plan.Name" Shape="square" Size="40" /> }
+                <div class="cb-plan__title">
+                    <h3 class="cb-plan__name">@_plan.Name</h3>
+                    @if (!string.IsNullOrEmpty(_plan.Description)) { <p class="cb-plan__desc">@_plan.Description</p> }
+                </div>
+            </div>
+            <div class="cb-plan__price">
+                @if (_plan.IsFree)
+                {
+                    <span class="cb-plan__amount">@L.Free</span>
+                }
+                else
+                {
+                    <span class="cb-plan__amount">@BillingFormat.Money(_period == "annual" ? _plan.AnnualMonthlyFee ?? _plan.Fee : _plan.Fee)</span>
+                    <span class="cb-plan__period">@L.PerMonth@(_period == "annual" ? $" · {L.BilledAnnually}" : null)</span>
+                }
+            </div>
+            @if (BillingFormat.HasAnnual(_plan))
+            {
+                <div class="cb-pricing__toggle" role="group" aria-label="@L.BillingPeriodLabel">
+                    <button type="button" aria-pressed="@(_period == "month" ? "true" : "false")" @onclick="@(() => _period = "month")">@L.Monthly</button>
+                    <button type="button" aria-pressed="@(_period == "annual" ? "true" : "false")" @onclick="@(() => _period = "annual")">@L.Annually</button>
+                </div>
+            }
+            @if (_plan.Features.Count > 0)
+            {
+                <h4 class="cb-heading">@L.Features</h4>
+                <ul class="cb-plan__features">
+                    @foreach (var f in _plan.Features)
+                    {
+                        <li>
+                            @if (!string.IsNullOrEmpty(f.AvatarUrl))
+                            {
+                                <Avatar ImageUrl="@f.AvatarUrl" Name="@f.Name" Shape="square" Size="24" />
+                            }
+                            else
+                            {
+                                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            }
+                            <span class="cb-feature__text">
+                                <span class="cb-text">@f.Name</span>
+                                @if (!string.IsNullOrEmpty(f.Description)) { <span class="cb-muted">@f.Description</span> }
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+            @Actions
+        </div>
+    }
+</Modal>
+
+@code {
+    private BillingPlan? _plan;
+    private string _period = "month";
+    private string? _loadedKey;
+
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    [Parameter] public string? PlanId { get; set; }
+    [Parameter] public BillingPlan? Plan { get; set; }
+    /// <summary><c>month</c> or <c>annual</c>.</summary>
+    [Parameter] public string InitialPlanPeriod { get; set; } = "month";
+    /// <summary>Optional footer actions (for example a checkout button).</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open) return;
+        var key = Plan?.Id ?? PlanId;
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        _period = InitialPlanPeriod == "annual" ? "annual" : "month";
+        _plan = Plan;
+        if (_plan is null && !string.IsNullOrEmpty(PlanId))
+            await RunAsync(async () => _plan = await Clerk.Billing.GetPlanAsync(PlanId));
+    }
+
+    private async Task OnOpenChanged(bool open)
+    {
+        Open = open;
+        if (!open) { _loadedKey = null; Error = null; }
+        await OpenChanged.InvokeAsync(open);
+    }
+}

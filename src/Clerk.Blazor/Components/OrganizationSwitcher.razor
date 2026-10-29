@@ -1,0 +1,59 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-organization-switcher")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <Popover @bind-Open="_open" Align="start" Role="dialog" AriaLabel="@L.SwitchOrganization">
+        <Trigger>
+            <button type="button" class="cb-switcher__trigger" aria-label="@L.SwitchOrganization" aria-haspopup="dialog" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open" disabled="@(!State.IsLoaded || State.User is null)">
+                <Avatar ImageUrl="@(State.Organization?.ImageUrl ?? State.User?.ImageUrl)" Name="@(State.Organization?.Name ?? (Env.Organizations.ForceOrganizationSelection ? L.OrganizationListTitle : L.PersonalAccount))" Shape="@(State.Organization is null ? "circle" : "square")" />
+                <span class="cb-person__name">@(State.Organization?.Name ?? (Env.Organizations.ForceOrganizationSelection ? L.OrganizationListTitle : L.PersonalAccount))</span><span aria-hidden="true">Ã¢Å’â€ž</span>
+            </button>
+        </Trigger>
+        <ChildContent>
+            @if (State.Organization is { } organization)
+            {
+                <div class="cb-menu__header cb-person"><Avatar ImageUrl="@organization.ImageUrl" Name="@organization.Name" Shape="square" /><span class="cb-person__name">@organization.Name</span><span class="cb-badge">@L.OrgCurrent</span></div>
+                <button type="button" class="cb-menu__item" @onclick="Manage">@L.ManageOrganization</button>
+            }
+            <OrganizationChoices HidePersonal="@HidePersonal" ExcludeActive="true" Menu="true" AfterSelectOrganizationUrl="@AfterSelectOrganizationUrl" AfterSelectPersonalUrl="@AfterSelectPersonalUrl" OnSelect="Selected" OnCreate="Create" />
+        </ChildContent>
+    </Popover>
+    <Modal @bind-Open="_profileOpen" Title="@L.ManageOrganization" CloseLabel="@L.Close" Class="cb-dialog--wide">
+        <OrganizationProfile @attributes="OrganizationProfileProps" Routing="ClerkRouting.Virtual" AfterLeaveOrganizationUrl="@AfterLeaveOrganizationUrl" CustomPages="@OrganizationProfilePages" BillingContent="@BillingContent" ApiKeysContent="@ApiKeysContent" OnLeave="() => _profileOpen = false" />
+    </Modal>
+    <Modal @bind-Open="_createOpen" Title="@L.CreateOrganization" CloseLabel="@L.Close" Class="cb-dialog--auth">
+        <CreateOrganization Routing="ClerkRouting.Virtual" AfterCreateOrganizationUrl="@AfterCreateOrganizationUrl" OnComplete="() => _createOpen = false" />
+    </Modal>
+</div>
+
+@code {
+    [Parameter] public bool HidePersonal { get; set; }
+    [Parameter] public bool DefaultOpen { get; set; }
+    [Parameter] public string? AfterSelectOrganizationUrl { get; set; }
+    [Parameter] public string? AfterSelectPersonalUrl { get; set; }
+    [Parameter] public string? AfterLeaveOrganizationUrl { get; set; }
+    [Parameter] public string? AfterCreateOrganizationUrl { get; set; }
+    [Parameter] public ClerkOrganizationMode OrganizationProfileMode { get; set; }
+    [Parameter] public ClerkOrganizationMode CreateOrganizationMode { get; set; }
+    [Parameter] public string? OrganizationProfileUrl { get; set; }
+    [Parameter] public string? CreateOrganizationUrl { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, object>? OrganizationProfileProps { get; set; }
+    [Parameter] public RenderFragment? OrganizationProfilePages { get; set; }
+    [Parameter] public RenderFragment? BillingContent { get; set; }
+    [Parameter] public RenderFragment? ApiKeysContent { get; set; }
+    private bool _open, _profileOpen, _createOpen;
+    protected override void OnInitialized() { base.OnInitialized(); _open = DefaultOpen; }
+    private void Selected(ClerkOrganization? organization) => _open = false;
+    private void Manage()
+    {
+        _open = false;
+        if (OrganizationProfileMode == ClerkOrganizationMode.Navigation) Go(OrganizationUi.WithQuery(OrganizationUi.Url(OrganizationProfileUrl ?? Clerk.Options.OrganizationProfileUrl, State.Organization?.Id, State.Organization?.Slug)!, "after_leave_organization_url", AfterLeaveOrganizationUrl));
+        else _profileOpen = true;
+    }
+    private void Create()
+    {
+        _open = false;
+        if (CreateOrganizationMode == ClerkOrganizationMode.Navigation) Go(OrganizationUi.WithQuery(CreateOrganizationUrl ?? Clerk.Options.CreateOrganizationUrl, "after_create_organization_url", AfterCreateOrganizationUrl));
+        else _createOpen = true;
+    }
+}

@@ -424,3 +424,39 @@
     .cb-root *, .cb-dialog, .cb-dialog::backdrop { animation-duration: 1ms !important; transition-duration: 1ms !important; }
     .cb-spinner { animation-duration: 1.5s !important; }
 }
+
+/* Custom trigger content passed to SignInButton / SignUpButton / SignOutButton. */
+.cb-trigger--bare { padding: 0; border-radius: 0; font: inherit; text-align: inherit; }
+.cb-trigger--bare:hover { background: none; }
+
+/* Billing, API keys, waitlist, OAuth consent */
+.cb-fieldset{border:0;margin:0;padding:0;min-width:0;display:flex;flex-direction:column;gap:.5rem}
+.cb-fieldset>legend{padding:0;margin-bottom:.5rem}
+.cb-choice__body{display:flex;flex-direction:column;flex:1;min-width:0}
+.cb-success-icon{color:var(--cb-success)}
+.cb-plan__head{display:flex;align-items:center;gap:.75rem}
+.cb-plan__title{display:flex;flex-direction:column;gap:.125rem;min-width:0}
+.cb-plan__title>*,.cb-plan__name{margin:0}
+.cb-plan__note{display:block;width:100%}
+.cb-plan__toggle{align-self:flex-start}
+.cb-plan__spacer{flex:1}
+.cb-heading{margin:.5rem 0 0;font-weight:600;font-size:.875rem}
+.cb-feature__text{display:flex;flex-direction:column}
+.cb-subs{list-style:none;margin:0;padding:0}
+.cb-sub{display:flex;flex-direction:column;gap:.5rem;padding:1rem 0;border-bottom:1px solid var(--cb-border)}
+.cb-sub:first-child{padding-top:0}
+.cb-tabpanel{display:flex;flex-direction:column;gap:1rem;padding-top:1rem}
+.cb-consent{display:flex;flex-direction:column;gap:1rem}
+.cb-consent__app{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-align:center}
+.cb-consent__notice{text-align:center;font-size:.8125rem;margin:0}
+.cb-actions--split>*{flex:1}
+
+/* Organization profile */
+.cb-organization-profile__tabs{display:flex;flex-direction:column;gap:.125rem}
+.cb-organization-profile__domain{flex-wrap:wrap}
+.cb-organization-profile__domain>.cb-field,
+.cb-organization-profile__domain>.cb-form{flex-basis:100%}
+.cb-organization-profile__invite{padding:1rem 0}
+@media(max-width:44rem){
+  .cb-organization-profile__tabs{flex-direction:row}
+}

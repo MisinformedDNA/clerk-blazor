@@ -1,394 +1,310 @@
 # clerk-blazor
 
-Clerk Authentication with Blazor WebAssembly.
+[Clerk](https://clerk.com) authentication for **Blazor WebAssembly**, with feature parity with Clerk React and **no React**.
+
+`Clerk.Blazor` loads the pinned, headless ClerkJS browser SDK (`@clerk/clerk-js@6.42.0`) through a small owned JavaScript bridge, and renders all UI as native Razor components:
+
+- **Typed services and reactive state.** `ClerkService` provides the equivalents of `useAuth`, `useUser`, `useSession`, `useOrganization`, `useSignIn`, `useSignUp`, billing hooks, and more. It plugs into Blazor's `AuthenticationStateProvider`.
+- **Native components.** `<SignIn>`, `<SignUp>`, `<UserButton>`, `<UserProfile>`, `<OrganizationSwitcher>`, `<OrganizationProfile>`, `<PricingTable>`, checkout, `<Waitlist>`, `<GoogleOneTap>`, and the rest of the Clerk React component set, styled with one themeable stylesheet.
+- **Zero React.** The bridge never loads `@clerk/ui`, never passes a UI constructor to `Clerk.load()`, and refuses every `mount*`/`open*` UI method and the React-backed Base/Coinbase wallet flows. Tests guard this.
+
+See [docs/parity.md](docs/parity.md) for the feature-by-feature mapping and the known gaps.
+
+> **Scope:** Blazor WebAssembly (browser) only. Blazor Server/SSR, middleware, and backend SDKs are out of scope. Client-side checks such as `<Show>` are presentation logic only. Always authorize on your API using the session token.
 
 ---
 
-## Clerk Blazor WASM Integration (MVP)
+## Contents
 
-This repository provides a minimal, production-ready starting point for
-integrating [Clerk](https://clerk.com) authentication into a **Blazor
-WebAssembly** (standalone) application using the official
-[@clerk/clerk-js](https://www.npmjs.com/package/@clerk/clerk-js) browser SDK
-via a thin C#/JS interop layer.
-
-> **Blazor Server** support is out of scope for this MVP. The implementation is
-> intentionally scoped to Blazor WASM (SPA) to keep it focused and reviewable.
-
----
-
-### Table of Contents
-
-1. [Architecture overview](#architecture-overview)
-2. [Sign-in flow (no page reload)](#sign-in-flow-no-page-reload)
-3. [Prerequisites](#prerequisites)
-4. [Quick start (local development)](#quick-start-local-development)
-5. [Redirect URLs](#redirect-urls)
-6. [Configuration & secrets](#configuration--secrets)
-7. [Required GitHub Secrets](#required-github-secrets)
-8. [Project structure](#project-structure)
-9. [Running tests](#running-tests)
-10. [Extending the integration](#extending-the-integration)
-11. [Security notes](#security-notes)
+1. [Quick start](#quick-start)
+2. [Routing and Clerk URLs](#routing-and-clerk-urls)
+3. [Components](#components)
+4. [Programmatic API](#programmatic-api)
+5. [Authorization](#authorization)
+6. [Theming and localization](#theming-and-localization)
+7. [Configuration and secrets](#configuration-and-secrets)
+8. [Migrating from the MVP API](#migrating-from-the-mvp-api)
+9. [Project structure and tests](#project-structure-and-tests)
+10. [Security notes](#security-notes)
 
 ---
 
-### Architecture overview
+## Quick start
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Blazor WASM (browser)                              │
-│                                                     │
-│  App.razor ──► ClerkAuthService (C#)                │
-│                   └──► clerkInterop.js (JS)         │
-│                            └──► window.Clerk (SDK)  │
-│                                                     │
-│  ClerkAuthenticationStateProvider                   │
-│   ├─ GetAuthenticationStateAsync()                  │
-│   ├─ ForceRefreshAsync()                            │
-│   ├─ NotifySignOut()                                │
-│   └─ OnAuthStateChanged(userJson?) ◄── JS callback  │
-└─────────────────────────────────────────────────────┘
-```
-
-The Clerk JS SDK is **loaded dynamically** from CDN by `clerkInterop.initialize()` only
-after the publishable key has been read from `IConfiguration` (see
-[Configuration & secrets](#configuration--secrets)). This ensures the SDK never
-executes without a valid key — preventing the `Missing publishableKey` error that
-newer versions of `clerk-js` throw at load time when no key is found. The C#
-`ClerkAuthService` calls into `clerkInterop.js` via `IJSRuntime`. The
-`ClerkAuthenticationStateProvider` builds a `ClaimsPrincipal` from the returned
-user data and feeds it to Blazor's `CascadingAuthenticationState`.
-
----
-
-### Sign-in flow (no page reload)
-
-Clicking **Sign in** from any page:
-
-1. `NavMenu.razor` calls `ClerkAuthService.SignInAsync()`, which calls
-   `clerkInterop.openSignIn()` in JavaScript.
-2. The Clerk hosted sign-in modal opens. `openSignIn()` returns immediately —
-   the JS runtime remains on the same page.
-3. The user completes sign-in inside the modal.
-4. Clerk fires the `addListener` callback registered via `clerkInterop.onAuthChange()`.
-5. In Clerk's hash-routing flow, after sign-in completes, Clerk fires the listener
-   with `{ user: null/undefined, session: undefined }`. The new session is already
-   present in `_clerk.client.activeSessions` but not yet activated client-side.
-   `setActive()` is called with that session; once it resolves, `_clerk.user` is
-   populated and its JSON is sent to .NET via
-   `DotNetObjectReference.invokeMethodAsync('OnAuthStateChanged', userJson)`.
-6. `ClerkAuthenticationStateProvider.OnAuthStateChanged` deserializes the user,
-   builds a `ClaimsPrincipal`, and calls `NotifyAuthenticationStateChanged`.
-7. Blazor's `CascadingAuthenticationState` propagates the new state to all
-   `<AuthorizeView>` components — the UI updates in-place with no page reload.
-
-**Key implementation detail**: `openSignIn()` redirects back to the same document
-using a hash-fragment URL (`window.location.pathname + window.location.search + '#auth-complete'`).
-A hash change does not cause a full-page reload, which keeps the Blazor WASM
-runtime alive and in memory.
-
-> **Bug that was fixed**: An earlier version called `await _clerk.load()` inside
-> the `addListener` callback. This is problematic for two reasons: (1) `_clerk.load()`
-> is idempotent after the first call — it does not re-fetch state; (2) calling it
-> inside the listener can trigger re-entrant listener invocations with stale null
-> state, overwriting the authenticated user. The fix instead reads the pending
-> session from `_clerk.client.activeSessions`, calls `setActive()` to activate it,
-> and reads `_clerk.user` directly after `setActive()` resolves — all within the
-> same callback invocation.
-
----
-
-### Prerequisites
-
-| Tool | Version |
-|------|---------|
-| .NET SDK | 10.x or later |
-| A Clerk application | Free tier is fine |
-
-Create your Clerk app at <https://dashboard.clerk.com>.
-
----
-
-### Quick start (local development)
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/MisinformedDNA/clerk-blazor.git
-   cd clerk-blazor
-   ```
-
-2. **Set your Publishable Key in `appsettings.Development.json`**
-
-   Open `src/Sample/wwwroot/appsettings.Development.json` and replace the
-   placeholder:
-
-   ```json
-   {
-     "Clerk": {
-       "PublishableKey": "pk_test_BYl3uCvG5R4RlKBa"
-     }
-   }
-   ```
-
-   Replace `pk_test_BYl3uCvG5R4RlKBa` with your **Publishable Key** from the
-   [Clerk Dashboard → API Keys](https://dashboard.clerk.com) page.
-
-   The Blazor WASM runtime automatically merges `appsettings.json` (default)
-   and `appsettings.Development.json` (development overlay) at startup via
-   `IConfiguration`.
-
-   > ℹ️ The Clerk Publishable Key (`pk_test_…` / `pk_live_…`) is **not** a
-   > secret — it is intentionally public. The actual secret is `CLERK_SECRET`
-   > (used server-side only). Never add `CLERK_SECRET` to any appsettings file.
-
-3. **Run the app**
-
-   ```bash
-   cd src/Sample
-   dotnet run --launch-profile https
-   # Open https://localhost:7077 in your browser
-   ```
-
-4. Click **Sign in** in the navigation bar. The Clerk hosted sign-in modal
-   will appear. After completing sign-in, the page does **not** reload — the
-   navigation bar updates in-place to show the authenticated view.
-
----
-
-### Redirect URLs
-
-Register the following URLs in your Clerk application's
-**Redirect URLs** list (Dashboard → Paths / Redirects):
-
-| URL | Purpose |
-|-----|---------|
-| `https://localhost:7077/` | Root / post-sign-in landing |
-| `https://localhost:7077/login` | Sign-in page |
-| `https://localhost:7077/logout` | Sign-out page |
-| `https://localhost:7077/authentication/login-callback` | Login callback |
-| `https://localhost:7077/authentication/logout-callback` | Logout callback |
-| `https://localhost:7077/authentication/silent-refresh` | Silent token refresh (optional) |
-
-For **production** add the equivalent URLs for your deployed domain.
-
----
-
-### Configuration & secrets
-
-#### Publishable Key (safe to expose to the browser)
-
-The Publishable Key (`pk_test_…` / `pk_live_…`) is a **non-secret** value that
-is safe to ship in the browser bundle. It identifies your Clerk application.
-
-Configuration is read from `wwwroot/appsettings.json` (default) and
-`wwwroot/appsettings.Development.json` (development overlay) via the standard
-Blazor WASM `IConfiguration` mechanism.
-
-| File | Purpose |
-|------|---------|
-| `wwwroot/appsettings.json` | Committed default — contains placeholder. Update for production at build time via CI/CD. |
-| `wwwroot/appsettings.Development.json` | Local dev overlay — replace the placeholder with your dev key. |
-
-For CI/CD, patch `appsettings.json` using a GitHub Actions step (see
-[Required GitHub Secrets](#required-github-secrets)):
-
-```yaml
-- name: Patch Clerk publishable key into appsettings.json
-  run: |
-    sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
-      src/Sample/wwwroot/appsettings.json
-```
-
-#### Secret Key (server-side only — never in the browser)
-
-The Clerk **Secret Key** (`sk_test_…` / `sk_live_…`) is used to verify
-sessions server-side (e.g. in a .NET API or Azure Function). **Never** expose
-this in the browser or commit it to source control.
-
-Store it as:
-- `CLERK_SECRET` GitHub Actions Secret
-- `dotnet user-secrets` for local API development:
-  ```bash
-  dotnet user-secrets set "Clerk:SecretKey" "sk_test_…"
-  ```
-- Azure Key Vault / AWS Secrets Manager / HashiCorp Vault in production.
-
----
-
-### Required GitHub Secrets
-
-Add these secrets to your GitHub repository
-(Settings → Secrets and variables → Actions → New repository secret):
-
-| Secret name | Description | Required |
-|-------------|-------------|----------|
-| `CLERK_PUBLISHABLE_KEY` | Clerk Publishable Key (`pk_test_…` or `pk_live_…`) | ✅ Required |
-| `CLERK_SECRET` | Clerk Secret Key (`sk_test_…`) for server-side session verification | ✅ Required (future server integration) |
-| `CLIENT_APP_URL` | Base URL of the deployed Blazor app (e.g. `https://app.example.com`) | Optional |
-
-#### Example GitHub Actions workflow snippet
-
-```yaml
-- name: Patch Clerk publishable key into appsettings.json
-  run: |
-    sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' \
-      src/Sample/wwwroot/appsettings.json
-
-- name: Publish
-  run: dotnet publish src/Sample/Sample.csproj -c Release -o publish/
-```
-
-> ⚠️ The example publishable key `BYl3uCvG5R4RlKBa` is a **local development
-> test key only**. It must not be committed to any non-example file and must
-> be rotated after testing.
-
----
-
-### Project structure
-
-```
-src/
-├── Clerk.Blazor/                      # Reusable Clerk authentication library
-│   ├── RedirectToLogin.razor          # Helper: redirects unauthenticated users
-│   ├── _Imports.razor                 # Global namespace imports
-│   ├── Clerk.Blazor.csproj            # Razor Class Library project file
-│   │
-│   ├── Services/
-│   │   ├── ClerkUser.cs               # DTO for JS → C# user data
-│   │   ├── ClerkAuthService.cs        # C# wrapper around clerkInterop.js
-│   │   └── ClerkAuthenticationStateProvider.cs  # AuthenticationStateProvider impl
-│   │
-│   └── wwwroot/
-│       └── js/
-│           └── clerkInterop.js        # JS interop module (Clerk SDK wrapper)
-│
-└── Sample/                            # Sample Blazor WASM application
-    ├── App.razor                      # Root component; initialises Clerk
-    ├── _Imports.razor                 # Global namespace imports
-    ├── Program.cs                     # Service registration
-    ├── Sample.csproj                  # Blazor WASM project file
-    │
-    ├── Pages/
-    │   ├── Login.razor                # Sign-in page
-    │   ├── Logout.razor               # Sign-out page
-    │   └── …                         # Default Blazor pages
-    │
-    ├── Layout/
-    │   ├── MainLayout.razor           # Shows current user in top bar
-    │   └── NavMenu.razor              # Login/logout links + Sign in button
-    │
-    └── wwwroot/
-        ├── appsettings.json           # Default config (Clerk:PublishableKey placeholder)
-        ├── appsettings.Development.json  # Dev overlay — replace placeholder with your key
-        └── index.html                 # Loads clerkInterop.js from Clerk.Blazor
-
-tests/
-├── Clerk.Blazor.Tests/                # Unit tests for the Clerk.Blazor library
-│   ├── FakeJSRuntime.cs               # Mock IJSRuntime for unit tests
-│   ├── ClerkAuthServiceTests.cs       # Unit tests for ClerkAuthService
-│   └── ClerkAuthStateProviderTests.cs # Unit tests for ClerkAuthenticationStateProvider
-│
-└── Sample.Tests/                      # Tests for the Sample application
-    ├── BlazorDevServer.cs             # Assembly fixture: builds & starts dev server
-    ├── SignInFlowTests.cs             # Playwright tests for the sign-in flow
-    ├── HomePageTests.cs               # Playwright tests for the Home page
-    └── LoginPageTests.cs              # Playwright tests for the Login page
-```
-
----
-
-### Running tests
-
-The test suite combines **unit tests** (fast, no browser required) and
-**Playwright end-to-end tests** (requires the Blazor dev server to start).
-
-```bash
-# Run all unit tests (Clerk.Blazor library)
-cd tests/Clerk.Blazor.Tests
-dotnet test
-
-# Run all tests for the Sample app (unit + Playwright)
-cd tests/Sample.Tests
-dotnet test
-
-# Run only Clerk.Blazor unit tests (no server needed)
-dotnet test tests/Clerk.Blazor.Tests --filter "FullyQualifiedName~ClerkAuthServiceTests|FullyQualifiedName~ClerkAuthStateProviderTests"
-
-# Run only Sample Playwright tests
-dotnet test tests/Sample.Tests --filter "FullyQualifiedName~HomePageTests|FullyQualifiedName~LoginPageTests|FullyQualifiedName~SignInFlowTests"
-```
-
-#### Unit tests
-
-| Class | What is tested |
-|-------|---------------|
-| `ClerkAuthServiceTests` | `IsInitialized` lifecycle, JS calls for sign-in/sign-out/get-user, idempotent initialization |
-| `ClerkAuthStateProviderTests` | `OnAuthStateChanged` with null and valid JSON, claim mapping, `ForceRefreshAsync` notifications |
-
-#### Playwright tests
-
-The Playwright tests start the Blazor dev server automatically via
-`BlazorDevServer` (`[SetUpFixture]`).  The sign-in flow tests replace
-`clerkInterop.js` at the network level with a mock that fires the .NET auth
-callback immediately, so they run without contacting Clerk's CDN or requiring
-real credentials.
-
-| Class | What is tested |
-|-------|---------------|
-| `HomePageTests` | Page load, heading, title, no JS errors, Sign in link visible |
-| `LoginPageTests` | Page load, heading, title, no JS errors, Sign in button visible |
-| `SignInFlowTests` | `openSignIn` is called on button click; UI updates to authorized view without page reload; protected pages accessible after sign-in; no JS errors during flow |
-| `ClerkSignInE2ETests` | Full sign-in with real Clerk credentials and OTP verification; Sign out link appears; Blazor WASM runtime stays alive (requires `CLERK_TEST_EMAIL` / `CLERK_TEST_PASSWORD` env vars) |
-
----
-
-### Extending the integration
-
-The interop layer is intentionally minimal. Common extensions:
-
-#### Server-side session verification
-
-Add a .NET API (separate project or Azure Function) that accepts a Clerk
-session token from the browser, verifies it using `CLERK_SECRET`, and returns a
-cookie or JWT:
+**1. Register Clerk** in `Program.cs`:
 
 ```csharp
-// Example verification using Clerk's REST API
-// See: https://clerk.com/docs/references/backend/sessions/verify-session
-var client = new HttpClient();
-client.DefaultRequestHeaders.Authorization =
-    new AuthenticationHeaderValue("Bearer", config["Clerk:SecretKey"]);
-var result = await client.GetAsync($"https://api.clerk.com/v1/sessions/{sessionId}/verify");
+builder.Services.AddClerk(options =>
+{
+    options.PublishableKey = builder.Configuration["Clerk:PublishableKey"]!;
+    options.SignInUrl = "/sign-in";
+    options.SignUpUrl = "/sign-up";
+    options.AfterSignOutUrl = "/";
+});
 ```
 
-#### Additional Clerk SDK methods
+`AddClerk` registers `ClerkService`, the `AuthenticationStateProvider`, and authorization core.
 
-Add new methods to `clerkInterop.js` (e.g. `openUserProfile()`, `openSignUp()`)
-and expose them through `ClerkAuthService.cs`. The JS interop module documents
-where to make these changes.
+**2. Wrap the router** in `App.razor`:
 
-#### Blazor Server
+```razor
+<ClerkProvider>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <NotAuthorized>
+                    <ClerkLoaded><SignIn Routing="ClerkRouting.Virtual" /></ClerkLoaded>
+                </NotAuthorized>
+            </AuthorizeRouteView>
+        </Found>
+    </Router>
+</ClerkProvider>
+```
 
-For Blazor Server, replace the JS interop approach with a server-side Clerk
-SDK call on the HTTP request pipeline. This is a separate integration and is
-not covered by this MVP.
+`ClerkProvider` loads ClerkJS, cascades `ClerkState`, injects the stylesheet, and hosts the reverification dialog.
+
+**3. Import the namespaces** in `_Imports.razor`:
+
+```razor
+@using Clerk.Blazor
+@using Clerk.Blazor.Components
+```
+
+**4. Use the components:**
+
+```razor
+<SignedIn>
+    <OrganizationSwitcher />
+    <UserButton ShowName />
+</SignedIn>
+<SignedOut>
+    <SignInButton Mode="ClerkButtonMode.Modal" />
+</SignedOut>
+```
+
+No script tags are needed. The bridge module and stylesheet ship as static web assets of the package.
+
+### Run the sample
+
+```bash
+# Put your pk_test_… key in src/Sample/wwwroot/appsettings.Development.json
+cd src/Sample
+dotnet run --launch-profile https
+```
+
+The sample shows every feature group:
+
+| Route | What it shows |
+|---|---|
+| `/` | Header with `UserButton`, `OrganizationSwitcher`, and a modal sign-in button |
+| `/protected` | `[Authorize]` page with inline sign-in; calls the sample API with `GetTokenAsync()` |
+| `/components` | Live state and the control, button, billing, and API-key components |
+| `/user` | `UserProfile`, with billing and API keys |
+| `/organization` | `OrganizationProfile`, or `OrganizationList` |
+| `/create-organization` | `CreateOrganization` |
+| `/pricing` | `PricingTable` |
+| `/waitlist` | `Waitlist` |
+| `/tasks/*` | Session task screens |
+| `/sign-in`, `/sign-up` | Callback targets for OAuth, SSO, and email links |
 
 ---
 
-### Security notes
+## Routing and Clerk URLs
 
-- **Do not commit secrets.** The `.gitignore` already ignores `*.env` files.
-  `appsettings.Development.json` ships with a placeholder — replace it locally
-  with your real dev key. Use `git update-index --skip-worktree
-  src/Sample/wwwroot/appsettings.Development.json` to prevent accidental
-  commits once you add a real key.
-- **Rotate test credentials** after sharing them or testing in CI.
-- **Use HTTPS** in all environments. The Blazor dev server defaults to
-  `https://localhost:7077`.
-- **Content Security Policy**: if you add a CSP header, allow the Clerk Frontend
-  API CDN (`*.clerk.accounts.dev`) for `script-src` and `connect-src`.
-- **Token storage**: Clerk JS manages tokens in memory / HTTP-only cookies. Do
-  not store session tokens in `localStorage` or `sessionStorage`.
+Native flows run inside Blazor without page reloads. Some steps must arrive on a URL:
 
+- OAuth and SAML callbacks (`/sign-in/sso-callback`)
+- Email-link verification (`/sign-in/verify`, `/sign-up/verify`)
+- Session tasks (`/tasks/choose-organization`, `/tasks/reset-password`, `/tasks/setup-mfa`)
+
+Pages hosting `<SignIn>` or `<SignUp>` with the default `ClerkRouting.Path` therefore need a catch-all route:
+
+```razor
+@page "/sign-in"
+@page "/sign-in/{*Path}"
+<SignIn />
+@code { [Parameter] public string? Path { get; set; } }
+```
+
+Use `Routing="ClerkRouting.Virtual"` for modal or inline usage. `SignInButton`/`SignUpButton` with `Mode="ClerkButtonMode.Modal"` do this automatically.
+
+In the Clerk Dashboard (**Paths**), set the sign-in, sign-up, and after-sign-out URLs to match `ClerkOptions`. Add your origins to the allowed redirect origins.
+
+---
+
+## Components
+
+All components accept `Class` and arbitrary HTML attributes (including `style` for per-instance `--cb-*` overrides). The table below summarizes the main parameters; see [docs/parity.md](docs/parity.md) for the full mapping.
+
+| Clerk React | Clerk.Blazor | Notes |
+|---|---|---|
+| `<ClerkProvider>` | `<ClerkProvider>` | Options come from `AddClerk`; `FailedContent` and `OnLoaded` parameters |
+| `<ClerkLoaded>`, `<ClerkLoading>`, `<ClerkDegraded>`, `<ClerkFailed>` | same | |
+| `<Show>` (`<SignedIn>`, `<SignedOut>`, `<Protect>`) | `<Show When=… Role=… Permission=… Feature=… Plan=… Condition=… Fallback=…>`, `<SignedIn>`, `<SignedOut>` | |
+| `<SignIn>`, `<SignUp>` | same | Every first and second factor, passkeys, Web3 (MetaMask, OKX, Solana), social/enterprise SSO, ticket, restricted/waitlist, legal consent, CAPTCHA |
+| `<SignInButton>`, `<SignUpButton>`, `<SignOutButton>`, `<SignInWithMetamaskButton>` | same | `ChildContent` replaces the default button |
+| `<UserAvatar>`, `<UserButton>` | same | Custom `UserButtonAction`/`UserButtonLink` items, multi-session switching |
+| `<UserProfile>` | same | Account and Security tabs; `UserProfilePage`/`UserProfileLink`; `BillingContent`, `ApiKeysContent` |
+| `<OrganizationSwitcher>`, `<OrganizationList>`, `<OrganizationProfile>`, `<CreateOrganization>` | same | Members, invitations, requests, domains, roles; custom pages |
+| `<PricingTable>`, `<CheckoutButton>`, `<PlanDetailsButton>`, `<SubscriptionDetailsButton>` | same | Native drawers; card entry stays inside Stripe's Payment Element |
+| `<APIKeys>`, `<Waitlist>`, `<GoogleOneTap>`, `<OAuthConsent>` | same | |
+| `<TaskChooseOrganization>`, `<TaskResetPassword>`, `<TaskSetupMFA>` | `<TaskChooseOrganization>`, `<TaskResetPassword>`, `<TaskSetupMfa>` | |
+| `<RedirectToSignIn>` and the other redirect controls | same | |
+| `<AuthenticateWithRedirectCallback>` | same | Usually unnecessary: `<SignIn>` handles `sso-callback` itself |
+
+---
+
+## Programmatic API
+
+Inject `ClerkService` (or use the cascaded `ClerkState`):
+
+```razor
+@inject ClerkService Clerk
+
+<p>@Clerk.State.User?.DisplayName</p>
+
+@code {
+    protected override void OnInitialized() => Clerk.StateChanged += _ => InvokeAsync(StateHasChanged);
+
+    async Task CallApiAsync()
+    {
+        var token = await Clerk.GetTokenAsync(new GetTokenOptions { Template = "my-template" });
+        // send as Authorization: Bearer <token>
+    }
+}
+```
+
+| React hook | Clerk.Blazor |
+|---|---|
+| `useAuth()` | `Clerk.Auth` / `State.Auth` (`IsSignedIn`, `UserId`, `SessionId`, `OrgId`, `OrgRole`, `Has(...)`), `GetTokenAsync`, `SignOutAsync` |
+| `useUser()`, `useSession()`, `useSessionList()` | `State.User`, `State.Session`, `State.Sessions`, `Clerk.User.*`, `Clerk.Session.*` |
+| `useOrganization()`, `useOrganizationList()` | `State.Organization`, `State.Membership`, `Clerk.Organization.*`, `SetActiveAsync` |
+| `useSignIn()`, `useSignUp()` | `Clerk.SignIn.*`, `Clerk.SignUp.*` (resources with live handles) |
+| `useReverification()` | `Clerk.WithReverificationAsync(...)` (shows the native dialog) |
+| `usePlans()`, `useSubscription()`, `useCheckout()`, `usePaymentMethods()`, `usePaymentAttempts()`, `useStatements()` | `Clerk.Billing.*` |
+| `useAPIKeys()` | `Clerk.ApiKeys.*` |
+| `useWaitlist()` | `Clerk.Waitlist.*` |
+| `useClerk()` | `ClerkService` (`Build*Url`, `RedirectTo*`, `HandleRedirectCallbackAsync`, `InvokeAsync(path, …)`) |
+
+Errors surface as `ClerkException` (`Code`, `Errors`, `FieldError(...)`, `TraceId`). Subtypes are `ClerkReverificationRequiredException` and `ClerkOfflineException`.
+
+---
+
+## Authorization
+
+`ClerkAuthenticationStateProvider` emits these claims:
+
+- `NameIdentifier`/`sub`, `sid`, `sts`
+- `Name`, `Email`, `GivenName`, `Surname`, `username`, `picture`
+- `org_id`, `org_slug`, `org_role` (also a `Role` claim), and one `org_permission` claim per permission
+
+`[Authorize]`, `<AuthorizeView>`, and role policies therefore work. Pending sessions (unfinished session tasks) count as signed out unless you set `TreatPendingAsSignedOut = false`.
+
+```razor
+<Show Permission="org:invoices:create" Fallback="@NoAccess">…</Show>
+@if (Clerk.Auth.Has(plan: "pro")) { … }
+```
+
+---
+
+## Theming and localization
+
+The stylesheet uses CSS custom properties on `.cb-root`:
+
+- `--cb-primary`, `--cb-primary-fg`
+- `--cb-bg`, `--cb-fg`, `--cb-muted`, `--cb-border`, `--cb-subtle`
+- `--cb-danger`, `--cb-success`, `--cb-warning`, `--cb-focus`
+- `--cb-radius`, `--cb-font`, `--cb-font-size`, `--cb-shadow`
+
+Set them in your own CSS, per component through `style`, or globally through `ClerkOptions.Appearance`:
+
+```csharp
+options.Appearance = new ClerkAppearance
+{
+    Theme = ClerkTheme.Auto,           // Light, Dark, Auto (prefers-color-scheme)
+    ColorPrimary = "#4f46e5",
+    BorderRadius = "10px",
+    FontFamily = "Inter, system-ui, sans-serif",
+};
+```
+
+Disable automatic stylesheet injection with `options.InjectStyles = false` and supply your own styles for the `cb-` classes.
+
+All user-visible strings live in `ClerkLocalization`. Replace any of them through `options.Localization`, e.g. `options.Localization = new ClerkLocalization { SignInTitle = "Welcome back" };`.
+
+---
+
+## Configuration and secrets
+
+`ClerkOptions` covers:
+
+- **Keys and hosting:** `PublishableKey`, `ProxyUrl`, `Domain`, `IsSatellite`
+- **Clerk URLs:** `SignInUrl`, `SignUpUrl`, `UserProfileUrl`, `OrganizationProfileUrl`, `CreateOrganizationUrl`, `WaitlistUrl`, `TasksUrl`
+- **Redirects:** sign-in/sign-up fallback and force URLs, `AfterSignOutUrl`, `AllowedRedirectOrigins`, `AllowedRedirectProtocols`
+- **Behavior:** `TreatPendingAsSignedOut`, `InjectStyles`, `Appearance`, `Localization`
+- **Script loading:** `ClerkJSVersion`/`ClerkJSUrl` (pinned to 6.42.0 by default), `Nonce`, `TelemetryDisabled`
+
+The **publishable key** (`pk_…`) is public and belongs in `wwwroot/appsettings*.json`. For CI, patch it in at build time:
+
+```yaml
+- name: Patch Clerk publishable key
+  run: sed -i 's|YOUR_CLERK_PUBLISHABLE_KEY|${{ secrets.CLERK_PUBLISHABLE_KEY }}|g' src/Sample/wwwroot/appsettings.json
+```
+
+The **secret key** (`sk_…`) is server-side only. Use it in your API (see `src/Sample.Api`) through user secrets or a vault. Never put it in WASM configuration.
+
+---
+
+## Migrating from the MVP API
+
+| Before | Now |
+|---|---|
+| `ClerkAuthService` + manual `InitializeAsync` in `App.razor` | `AddClerk(...)` + `<ClerkProvider>` |
+| `<script src="_content/Clerk.Blazor/js/clerkInterop.js">` | Remove it. The module is imported automatically |
+| `OpenSignInAsync()` (Clerk's React modal) | `<SignInButton Mode="ClerkButtonMode.Modal">` or `<SignIn>` |
+| `GetSessionTokenAsync()` | `ClerkService.GetTokenAsync()` |
+| `SignOutAsync()` | `ClerkService.SignOutAsync()` or `<SignOutButton>` |
+| `<ClerkUserButton>` | `<UserButton>` |
+| `<RedirectToLogin>` | `<RedirectToSignIn>` |
+| `ClerkUser` DTO | `ClerkState.User` (`ClerkUser` with emails, phones, wallets, accounts, passkeys, memberships) |
+
+---
+
+## Project structure and tests
+
+```
+src/Clerk.Blazor/        Library
+  ClerkService.cs          Lifecycle, state, auth helpers, URL builders
+  ClerkApis.cs             Typed SignIn/SignUp/User/Organization/Billing/ApiKeys/Waitlist/OAuth/Session APIs
+  Models/                  State and resource snapshots
+  Components/              Public Razor components
+  Internal/                Primitives: Card, Field, Modal, Popover, …
+  wwwroot/js/clerk-blazor.js   Headless ClerkJS bridge
+  wwwroot/clerk-blazor.css     Themeable stylesheet
+src/Sample/              Blazor WASM sample
+src/Sample.Api/          Minimal API that verifies Clerk session tokens
+tests/Clerk.Blazor.Tests/  NUnit: state, Has(), redirects, reverification, errors, claims
+tests/Sample.Tests/        Playwright: real bridge against a fake window.Clerk, zero-React guards,
+                           opt-in real-Clerk E2E (ClerkSignInE2ETests, [Explicit])
+```
+
+```bash
+dotnet test tests/Clerk.Blazor.Tests
+dotnet test tests/Sample.Tests          # starts the sample automatically
+```
+
+The real-Clerk E2E test needs a development key in `appsettings.Development.json`, plus the `CLERK_TEST_EMAIL` and `CLERK_TEST_PASSWORD` environment variables. Run it with `--filter ClerkSignInE2ETests`.
+
+---
+
+## Security notes
+
+- Client-side checks (`<Show>`, `Has`, `[Authorize]` in WASM) hide UI only. Verify the session token on every API request.
+- `redirect_url` values are restricted to same-origin paths and `AllowedRedirectOrigins` (`ClerkService.ResolveRedirect`).
+- **Content Security Policy:**
+  - `script-src` and `connect-src`: allow your Clerk Frontend API (`*.clerk.accounts.dev` or your custom domain).
+  - Billing: allow `js.stripe.com`.
+  - Google One Tap: allow `accounts.google.com`.
+  - Set `ClerkOptions.Nonce` if you use script nonces.
+- Card details are entered only in Stripe's Payment Element iframe. They never reach .NET.
+- Do not store session tokens yourself. ClerkJS manages them.

@@ -1,0 +1,22 @@
+@page "/organization/{*Path}"
+@page "/organization"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<PageTitle>Organization</PageTitle>
+<h1 class="visually-hidden">Organization</h1>
+
+<Show When="ShowWhen.SignedIn" Condition="auth => auth.OrgId is not null">
+    <ChildContent>
+        <OrganizationProfile BillingContent="@Billing" ApiKeysContent="@ApiKeys" />
+    </ChildContent>
+    <Fallback>
+        <OrganizationList HidePersonal AfterSelectOrganizationUrl="/organization" />
+    </Fallback>
+</Show>
+
+@code {
+    [Parameter] public string? Path { get; set; }
+
+    private readonly RenderFragment Billing = @<BillingPage For="organization" />;
+    private readonly RenderFragment ApiKeys = @<APIKeys />;
+}

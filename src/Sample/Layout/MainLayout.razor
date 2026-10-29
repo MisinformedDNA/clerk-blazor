@@ -1,5 +1,4 @@
 @inherits LayoutComponentBase
-@using Microsoft.AspNetCore.Components.Authorization
 
 <div class="page">
     <div class="sidebar">
@@ -8,18 +7,14 @@
 
     <main>
         <div class="top-row px-4 auth">
-            <AuthorizeView>
-                <Authorized>
-                    <div class="auth-actions">
-                        Hello, <strong>@context.User.Identity?.Name</strong>!
-                        <ClerkUserButton />
-                        <a href="logout">Sign out</a>
-                    </div>
-                </Authorized>
-                <NotAuthorized>
-                    <a href="login">Sign in</a>
-                </NotAuthorized>
-            </AuthorizeView>
+            <Show When="ShowWhen.SignedIn">
+                <OrganizationSwitcher />
+                <UserButton ShowName />
+            </Show>
+            <Show When="ShowWhen.SignedOut">
+                <SignInButton Mode="ClerkButtonMode.Modal" />
+                <SignUpButton />
+            </Show>
         </div>
 
         <article class="content px-4">

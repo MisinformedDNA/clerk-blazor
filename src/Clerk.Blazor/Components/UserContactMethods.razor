@@ -1,0 +1,91 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-stack")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (State.User is { } user)
+    {
+        <ul class="cb-list">
+            @foreach (var contact in Contacts(user))
+            {
+                <li class="cb-list__item" @key="contact.Id">
+                    <div class="cb-list__main"><span class="cb-person__name">@contact.Value</span>
+                        @if (contact.Primary) { <span class="cb-badge cb-badge--primary">@L.Primary</span> }
+                        @if (!contact.Verified) { <span class="cb-badge cb-badge--warning">@L.Unverified</span> }
+                        @if (contact.Linked) { <span class="cb-badge">@L.UserLinked</span> }
+                    </div>
+                    <div class="cb-list__actions">
+                        @if (!contact.Verified) { <button type="button" class="cb-link" disabled="@Busy" @onclick="() => PrepareAsync(contact.Id)">@L.Verify</button> }
+                        @if (contact.Verified && !contact.Primary && !SetupSecondFactor) { <button type="button" class="cb-link" disabled="@Busy" @onclick="() => PrimaryAsync(contact.Id)">@L.MakePrimary</button> }
+                        @if (!contact.Primary && !SetupSecondFactor) { <UserConfirmAction Label="@L.Remove" Disabled="Busy" OnConfirm="() => RemoveAsync(contact.Id)" /> }
+                    </div>
+                </li>
+            }
+        </ul>
+        @if (_verifyId is not null)
+        {
+            <form class="cb-form" @onsubmit="VerifyAsync" @onsubmit:preventDefault>
+                <Field Label="@L.Code" @bind-Value="_code" Autocomplete="one-time-code" InputMode="numeric" Required Disabled="Busy" />
+                <div class="cb-actions"><button type="button" class="cb-link" disabled="@Busy" @onclick="() => PrepareAsync(_verifyId)">@L.Resend</button><Btn Variant="outline" Disabled="Busy" OnClick="Cancel">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Verify</Btn></div>
+            </form>
+        }
+        else if (_adding)
+        {
+            <form class="cb-form" @onsubmit="AddAsync" @onsubmit:preventDefault>
+                <Field Label="@(Phone ? L.PhoneNumber : L.EmailAddress)" Type="@(Phone ? "tel" : "email")" @bind-Value="_value" Autocomplete="@(Phone ? "tel" : "email")" Required Disabled="Busy" />
+                <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="Cancel">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Continue</Btn></div>
+            </form>
+        }
+        else
+        {
+            <button type="button" class="cb-link" disabled="@Busy" @onclick="() => _adding = true">@(Phone ? L.AddPhone : L.AddEmail)</button>
+        }
+    }
+    <Alert Message="@GlobalError()" />
+</div>
+
+@code {
+    [Parameter] public bool Phone { get; set; }
+    [Parameter] public bool SetupSecondFactor { get; set; }
+    [Parameter] public EventCallback OnConfigured { get; set; }
+    private bool _adding;
+    private string _value = "", _code = "";
+    private string? _verifyId;
+    private sealed record Contact(string Id, string Value, bool Primary, bool Verified, bool Linked);
+    private IEnumerable<Contact> Contacts(ClerkUser user) => Phone
+        ? user.PhoneNumbers.Select(p => new Contact(p.Id, p.PhoneNumber, p.Id == user.PrimaryPhoneNumberId, p.Verification?.IsVerified == true, false))
+        : user.EmailAddresses.Select(e => new Contact(e.Id, e.EmailAddress, e.Id == user.PrimaryEmailAddressId, e.Verification?.IsVerified == true, e.LinkedTo.Count > 0));
+    private void Cancel() { _adding = false; _verifyId = null; _code = ""; _value = ""; Error = null; }
+    private async Task AddAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var resource = Phone ? await Clerk.User.CreatePhoneNumberAsync(_value.Trim()) : await Clerk.User.CreateEmailAddressAsync(_value.Trim());
+            _verifyId = resource.Id;
+            if (_verifyId is null) throw new ClerkException("missing_identifier", L.SomethingWentWrong);
+            _adding = false;
+            await PrepareCoreAsync(_verifyId);
+        });
+    }
+    private Task PrepareCoreAsync(string id) => Phone ? Clerk.User.PreparePhoneVerificationAsync(id) : Clerk.User.PrepareEmailVerificationAsync(id);
+    private async Task PrepareAsync(string id)
+    {
+        if (await RunAsync(() => PrepareCoreAsync(id))) { _verifyId = id; _code = ""; }
+    }
+    private async Task VerifyAsync()
+    {
+        if (_verifyId is null) return;
+        var id = _verifyId;
+        if (await RunAsync(async () =>
+        {
+            if (Phone) await Clerk.User.AttemptPhoneVerificationAsync(id, _code.Trim());
+            else await Clerk.User.AttemptEmailVerificationAsync(id, _code.Trim());
+            if (SetupSecondFactor && Phone) await Clerk.User.SetPhoneReservedForSecondFactorAsync(id, true);
+        }))
+        {
+            Cancel();
+            if (SetupSecondFactor) await OnConfigured.InvokeAsync();
+        }
+    }
+    private Task<bool> PrimaryAsync(string id) => RunAsync(() => Phone ? Clerk.User.SetPrimaryPhoneNumberAsync(id) : Clerk.User.SetPrimaryEmailAddressAsync(id));
+    private Task<bool> RemoveAsync(string id) => RunAsync(() => Phone ? Clerk.User.RemovePhoneNumberAsync(id) : Clerk.User.RemoveEmailAddressAsync(id));
+}

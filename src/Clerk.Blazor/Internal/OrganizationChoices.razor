@@ -1,0 +1,170 @@
+@namespace Clerk.Blazor.Internal
+@inherits ClerkComponentBase
+
+<Alert Message="@GlobalError()" />
+@if (Error is not null) { <Btn Variant="ghost" Disabled="@Busy" OnClick="LoadAsync">@L.OrgRetry</Btn> }
+@if (!_loaded)
+{
+    <p class="cb-empty" role="status">@L.Loading</p>
+}
+else
+{
+    <div class="cb-menu" role="@(Menu ? "menu" : null)" aria-label="@L.OrganizationListTitle">
+        @if (State.User is not null && !HidePersonal && !Env.Organizations.ForceOrganizationSelection)
+        {
+            <button type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="() => SelectAsync(null)">
+                <Avatar ImageUrl="@State.User?.ImageUrl" Name="@(State.User?.FullName ?? L.PersonalAccount)" />
+                <span class="cb-person__text"><span class="cb-person__name">@L.PersonalAccount</span><span class="cb-person__sub">@State.User?.FullName</span></span>
+                @if (State.Organization is null) { <span class="cb-badge">@L.OrgCurrent</span> }
+            </button>
+        }
+        @foreach (var membership in _memberships)
+        {
+            @if (membership.Organization is { } org && !(ExcludeActive && org.Id == State.Organization?.Id))
+            {
+                <button @key="org.Id" type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="() => SelectAsync(org)">
+                    <Avatar ImageUrl="@org.ImageUrl" Name="@org.Name" Shape="square" /><span class="cb-person__name">@org.Name</span>
+                    @if (org.Id == State.Organization?.Id) { <span class="cb-badge">@L.OrgCurrent</span> }
+                </button>
+            }
+        }
+        @if (_memberships.Count == 0 && HidePersonal) { <p class="cb-empty">@L.OrgNoMemberships</p> }
+        @if (_memberships.Count < _membershipTotal)
+        {
+            <button type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="LoadMembershipsAsync">@L.OrgLoadMore</button>
+        }
+        @if (_invitations.Count > 0)
+        {
+            <div class="cb-menu__header" role="presentation">@L.Invitations</div>
+            @foreach (var invitation in _invitations)
+            {
+                <button @key="invitation.Id" type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="() => AcceptAsync(invitation)">
+                    <Avatar ImageUrl="@invitation.PublicOrganizationData?.ImageUrl" Name="@invitation.PublicOrganizationData?.Name" Shape="square" />
+                    <span class="cb-person__name">@invitation.PublicOrganizationData?.Name</span><span class="cb-badge">@L.Accept</span>
+                </button>
+            }
+        }
+        @if (_invitations.Count < _invitationTotal)
+        {
+            <button type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="LoadInvitationsAsync">@L.OrgLoadMore</button>
+        }
+        @if (_suggestions.Count > 0)
+        {
+            <div class="cb-menu__header" role="presentation">@L.OrgSuggestions</div>
+            @foreach (var suggestion in _suggestions)
+            {
+                <button @key="suggestion.Id" type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@(Busy || suggestion.Status == "accepted")" @onclick="() => AcceptAsync(suggestion)">
+                    <Avatar ImageUrl="@suggestion.PublicOrganizationData?.ImageUrl" Name="@suggestion.PublicOrganizationData?.Name" Shape="square" />
+                    <span class="cb-person__name">@suggestion.PublicOrganizationData?.Name</span><span class="cb-badge">@(suggestion.Status == "accepted" ? L.Requested : L.Join)</span>
+                </button>
+            }
+        }
+        @if (_suggestions.Count < _suggestionTotal)
+        {
+            <button type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="LoadSuggestionsAsync">@L.OrgLoadMore</button>
+        }
+        @if (ShowCreate && Env.Organizations.Enabled && State.User?.CreateOrganizationEnabled == true)
+        {
+            <button type="button" class="cb-menu__item" role="@(Menu ? "menuitem" : null)" disabled="@Busy" @onclick="() => OnCreate.InvokeAsync()">@L.CreateOrganization</button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool HidePersonal { get; set; }
+    [Parameter] public bool ExcludeActive { get; set; }
+    [Parameter] public bool Menu { get; set; }
+    [Parameter] public bool ShowCreate { get; set; } = true;
+    [Parameter] public string? AfterSelectOrganizationUrl { get; set; }
+    [Parameter] public string? AfterSelectPersonalUrl { get; set; }
+    [Parameter] public EventCallback<ClerkOrganization?> OnSelect { get; set; }
+    [Parameter] public EventCallback OnCreate { get; set; }
+    private readonly List<ClerkOrganizationMembership> _memberships = [];
+    private readonly List<UserOrganizationInvitation> _invitations = [];
+    private readonly List<OrganizationSuggestion> _suggestions = [];
+    private int _membershipPage = 1, _invitationPage = 1, _suggestionPage = 1;
+    private int _membershipTotal, _invitationTotal, _suggestionTotal;
+    private bool _loaded, _loading;
+    private string? _userId;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override void OnClerkStateChanged(ClerkState state)
+    {
+        base.OnClerkStateChanged(state);
+        if (!_loading && state.User?.Id != _userId) _ = InvokeAsync(LoadAsync);
+    }
+    private async Task LoadAsync()
+    {
+        if (_loading) return;
+        _loading = true;
+        _loaded = false;
+        _userId = State.User?.Id;
+        _memberships.Clear(); _invitations.Clear(); _suggestions.Clear();
+        _membershipPage = _invitationPage = _suggestionPage = 1;
+        _membershipTotal = _invitationTotal = _suggestionTotal = 0;
+        if (_userId is not null) await RunAsync(async () => {
+            var userId = _userId;
+            var memberships = await Clerk.User.GetOrganizationMembershipsAsync();
+            if (State.User?.Id != userId) return;
+            _memberships.AddRange(memberships.Data); _membershipTotal = memberships.TotalCount;
+            var invitations = await Clerk.User.GetOrganizationInvitationsAsync();
+            if (State.User?.Id != userId) return;
+            _invitations.AddRange(invitations.Data); _invitationTotal = invitations.TotalCount;
+            var suggestions = Env.Organizations.DomainsEnabled ? await Clerk.User.GetOrganizationSuggestionsAsync() : new ClerkPage<OrganizationSuggestion>([], 0);
+            if (State.User?.Id != userId) return;
+            _suggestions.AddRange(suggestions.Data); _suggestionTotal = suggestions.TotalCount;
+        });
+        _loaded = State.IsLoaded;
+        _loading = false;
+        StateHasChanged();
+        if (State.User?.Id != _userId) await LoadAsync();
+    }
+    private Task LoadMembershipsAsync() => RunAsync(async () => {
+        var page = await Clerk.User.GetOrganizationMembershipsAsync(_membershipPage + 1);
+        _membershipPage++; _memberships.AddRange(page.Data.Where(item => !_memberships.Any(old => old.Id == item.Id))); _membershipTotal = page.TotalCount;
+    });
+    private Task LoadInvitationsAsync() => RunAsync(async () => {
+        var page = await Clerk.User.GetOrganizationInvitationsAsync(_invitationPage + 1);
+        _invitationPage++; _invitations.AddRange(page.Data.Where(item => !_invitations.Any(old => old.Id == item.Id))); _invitationTotal = page.TotalCount;
+    });
+    private Task LoadSuggestionsAsync() => RunAsync(async () => {
+        var page = await Clerk.User.GetOrganizationSuggestionsAsync(_suggestionPage + 1);
+        _suggestionPage++; _suggestions.AddRange(page.Data.Where(item => !_suggestions.Any(old => old.Id == item.Id))); _suggestionTotal = page.TotalCount;
+    });
+    private async Task SelectAsync(ClerkOrganization? organization)
+    {
+        var url = organization is null ? AfterSelectPersonalUrl : OrganizationUi.Url(AfterSelectOrganizationUrl, organization.Id, organization.Slug);
+        if (await RunAsync(() => Clerk.Organization.SetActiveAsync(organization?.Id, url))) await SelectedAsync(organization);
+    }
+    private async Task SelectedAsync(ClerkOrganization? organization)
+    {
+        await OnSelect.InvokeAsync(organization);
+    }
+    private async Task AcceptAsync(UserOrganizationInvitation invitation)
+    {
+        var data = invitation.PublicOrganizationData;
+        if (data is null) return;
+        if (await RunAsync(async () => {
+            await Clerk.User.AcceptInvitationAsync(invitation);
+            await Clerk.Organization.SetActiveAsync(data.Id, OrganizationUi.Url(AfterSelectOrganizationUrl, data.Id, data.Slug));
+        })) {
+            await LoadAsync();
+            await SelectedAsync(new ClerkOrganization { Id = data.Id, Name = data.Name, Slug = data.Slug, ImageUrl = data.ImageUrl });
+        }
+    }
+    private async Task AcceptAsync(OrganizationSuggestion suggestion)
+    {
+        if (!await RunAsync(() => Clerk.User.AcceptSuggestionAsync(suggestion))) return;
+        await LoadAsync();
+        var id = suggestion.PublicOrganizationData?.Id;
+        if (id is null) return;
+        ClerkOrganization? joined = _memberships.FirstOrDefault(m => m.Organization?.Id == id)?.Organization;
+        if (joined is null && _membershipTotal > 10) await RunAsync(async () => {
+            for (var pageNumber = 2; joined is null && (pageNumber - 1) * 10 < _membershipTotal; pageNumber++) {
+                var page = await Clerk.User.GetOrganizationMembershipsAsync(pageNumber);
+                joined = page.Data.FirstOrDefault(m => m.Organization?.Id == id)?.Organization;
+                if (page.Data.Count == 0) break;
+            }
+        });
+        if (joined is not null) await SelectAsync(joined);
+    }
+}

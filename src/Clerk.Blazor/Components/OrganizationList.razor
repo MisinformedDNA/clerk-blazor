@@ -1,0 +1,26 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-organization-list")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (_creating)
+    {
+        <CreateOrganization Routing="ClerkRouting.Virtual" AfterCreateOrganizationUrl="@AfterCreateOrganizationUrl" OnComplete="CreatedAsync" />
+        <Btn Variant="ghost" OnClick="() => _creating = false">@L.Back</Btn>
+    }
+    else
+    {
+        <Card Title="@L.OrganizationListTitle">
+            <OrganizationChoices HidePersonal="@HidePersonal" AfterSelectOrganizationUrl="@AfterSelectOrganizationUrl" AfterSelectPersonalUrl="@AfterSelectPersonalUrl" OnSelect="OnSelect" OnCreate="() => _creating = true" />
+        </Card>
+    }
+</div>
+
+@code {
+    [Parameter] public bool HidePersonal { get; set; }
+    [Parameter] public string? AfterSelectOrganizationUrl { get; set; }
+    [Parameter] public string? AfterSelectPersonalUrl { get; set; }
+    [Parameter] public string? AfterCreateOrganizationUrl { get; set; }
+    [Parameter] public EventCallback<ClerkOrganization?> OnSelect { get; set; }
+    private bool _creating;
+    private async Task CreatedAsync(ClerkOrganization organization) { _creating = false; await OnSelect.InvokeAsync(organization); }
+}

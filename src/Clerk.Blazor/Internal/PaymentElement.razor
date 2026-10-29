@@ -1,0 +1,73 @@
+@namespace Clerk.Blazor.Internal
+@implements IAsyncDisposable
+@inject ClerkService Clerk
+
+@* Hosts Stripe's payment element (Stripe.js is framework-free). Mounted on first render. *@
+<div class="cb-stack cb-stack--sm">
+    @if (!_ready && _error is null)
+    {
+        <div class="cb-center" role="status"><span class="cb-spinner" aria-hidden="true"></span><span class="cb-muted">@Clerk.Options.Localization.BillingPaymentFormLoading</span></div>
+    }
+    <div class="cb-payment-element" @ref="_host" hidden="@(!_ready)"></div>
+    <Alert Message="@_error" />
+</div>
+
+@code {
+    private ElementReference _host;
+    private string? _id;
+    private bool _ready;
+    private string? _error;
+
+    /// <summary>Checkout handle; when null a new payment method is initialized for the payer.</summary>
+    [Parameter] public string? CheckoutHandle { get; set; }
+    [Parameter] public bool ForOrganization { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var id = await Clerk.CallBridgeAsync("mountPaymentElement", CheckoutHandle, ForOrganization, _host, StripeAppearance());
+            _id = id.GetString();
+            _ready = true;
+        }
+        catch (ClerkException ex) { _error = ex.Message; }
+        catch (JSException ex) { _error = ex.Message; }
+        StateHasChanged();
+    }
+
+    /// <summary>Validates and confirms the payment details. Returns the gateway payment token.</summary>
+    public async Task<string> SubmitAsync()
+    {
+        if (_id is null) throw new ClerkException("payment_not_initialized", _error ?? "The payment form isn't ready yet.");
+        var result = await Clerk.CallBridgeAsync("submitPaymentElement", _id);
+        return result.GetProperty("paymentToken").GetString()
+            ?? throw new ClerkException("payment_failed", "The payment provider didn't return a payment method.");
+    }
+
+    private object StripeAppearance()
+    {
+        var a = Clerk.Options.Appearance;
+        var vars = ClerkArgs.Of(
+            ("colorPrimary", a.ColorPrimary),
+            ("colorBackground", a.ColorBackground),
+            ("colorText", a.ColorForeground),
+            ("colorDanger", a.ColorDanger),
+            ("borderRadius", a.BorderRadius),
+            ("fontFamily", a.FontFamily));
+        return new Dictionary<string, object?>
+        {
+            ["theme"] = a.Theme == ClerkTheme.Dark ? "night" : "stripe",
+            ["variables"] = vars,
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_id is null) return;
+        try { await (await Clerk.BridgeModuleAsync()).InvokeVoidAsync("unmountPaymentElement", _id); }
+        catch (JSDisconnectedException) { }
+        catch (ObjectDisposedException) { }
+        _id = null;
+    }
+}

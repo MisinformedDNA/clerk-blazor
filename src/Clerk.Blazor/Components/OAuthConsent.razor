@@ -1,0 +1,154 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@using Clerk.Blazor.Internal
+
+@*
+    OAuth consent screen (<OAuthConsent />). Mirrors Clerk's prebuilt component: a native POST form to the
+    consent action URL that forwards every current query parameter and submits consented=true|false.
+*@
+<Card Title="@CardTitle" Class="@($"cb-oauth-consent {Class}")" AdditionalAttributes="AdditionalAttributes" ShowLogo="false">
+    @if (string.IsNullOrEmpty(EffectiveClientId))
+    {
+        <Alert Message="@L.OAuthConsentMissingClient" />
+    }
+    else if (_info is null || _actionUrl is null)
+    {
+        @if (Error is null)
+        {
+            <div class="cb-center" role="status"><span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>
+        }
+        else
+        {
+            <Alert Message="@GlobalError()" />
+        }
+    }
+    else
+    {
+        <div class="cb-consent">
+            <div class="cb-consent__app">
+                <Avatar ImageUrl="@_info.OauthApplicationLogoUrl" Name="@_info.OauthApplicationName" Shape="square" Size="48" />
+                @if (State.User is { } user)
+                {
+                    <p class="cb-muted">@Format(L.OAuthConsentSignedInAs, user.Identifier ?? user.DisplayName)</p>
+                }
+            </div>
+            @if (_info.Scopes.Count > 0)
+            {
+                <p class="cb-text">@Format(L.OAuthConsentHint, _info.OauthApplicationName)</p>
+                <ul class="cb-plan__features cb-consent__scopes">
+                    @foreach (var scope in _info.Scopes)
+                    {
+                        <li>
+                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span>@(string.IsNullOrEmpty(scope.Description) ? scope.Scope : scope.Description)</span>
+                        </li>
+                    }
+                </ul>
+            }
+            <form method="post" action="@_actionUrl" class="cb-form">
+                @foreach (var (name, value) in ForwardedParams)
+                {
+                    <input type="hidden" name="@name" value="@value" />
+                }
+                <div class="cb-actions cb-actions--split">
+                    <button type="submit" name="consented" value="false" class="cb-btn cb-btn--outline">@L.Deny</button>
+                    <button type="submit" name="consented" value="true" class="cb-btn cb-btn--primary">@L.Allow</button>
+                </div>
+            </form>
+            @if (!string.IsNullOrEmpty(RedirectDomain))
+            {
+                <p class="cb-muted cb-consent__notice">@Format(L.OAuthConsentRedirectNotice, RedirectDomain)</p>
+            }
+        </div>
+    }
+</Card>
+
+@code {
+    private OAuthConsentInfo? _info;
+    private string? _actionUrl;
+    private string? _loadedKey;
+
+    /// <summary>OAuth client id. Defaults to the <c>client_id</c> query parameter.</summary>
+    [Parameter] public string? ClientId { get; set; }
+    /// <summary>Requested scopes (space separated). Defaults to the <c>scope</c> query parameter.</summary>
+    [Parameter] public string? Scope { get; set; }
+    /// <summary>Redirect URI. Defaults to the <c>redirect_uri</c> query parameter.</summary>
+    [Parameter] public string? RedirectUri { get; set; }
+
+    private List<KeyValuePair<string, string>> _query = [];
+
+    private string? EffectiveClientId => ClientId ?? Query("client_id");
+    private string? EffectiveScope => Scope ?? Query("scope");
+    private string? EffectiveRedirectUri => RedirectUri ?? Query("redirect_uri");
+
+    private string CardTitle => _info is null ? L.Continue : Format(L.OAuthConsentTitle, _info.OauthApplicationName);
+
+    private string? RedirectDomain
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(_info?.RedirectDomain)) return _info.RedirectDomain;
+            return Uri.TryCreate(EffectiveRedirectUri, UriKind.Absolute, out var u) ? u.Host : null;
+        }
+    }
+
+    /// <summary>All current query parameters, plus explicitly supplied parameters that are missing from the query.</summary>
+    private IEnumerable<(string Name, string Value)> ForwardedParams
+    {
+        get
+        {
+            foreach (var kv in _query) yield return (kv.Key, kv.Value);
+            if (ClientId is not null && Query("client_id") is null) yield return ("client_id", ClientId);
+            if (Scope is not null && Query("scope") is null) yield return ("scope", Scope);
+            if (RedirectUri is not null && Query("redirect_uri") is null) yield return ("redirect_uri", RedirectUri);
+        }
+    }
+
+    private string? Query(string name) => _query.FirstOrDefault(kv => kv.Key == name) is { Key: not null } kv ? kv.Value : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _query = ParseQuery();
+        await LoadAsync();
+    }
+
+    protected override void OnClerkStateChanged(ClerkState state)
+    {
+        _ = LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (!Auth.IsLoaded) return;
+        if (!Auth.IsSignedIn) { Clerk.RedirectToSignIn(Navigation.Uri); return; }
+        var clientId = EffectiveClientId;
+        if (string.IsNullOrEmpty(clientId)) return;
+        var key = $"{Auth.UserId}|{clientId}|{EffectiveScope}|{EffectiveRedirectUri}";
+        if (key == _loadedKey) return;
+        _loadedKey = key;
+        _info = null;
+        _actionUrl = null;
+        var ok = await RunAsync(async () =>
+        {
+            _info = await Clerk.OAuth.GetConsentInfoAsync(clientId, EffectiveScope, EffectiveRedirectUri);
+            _actionUrl = await Clerk.OAuth.BuildConsentActionUrlAsync(clientId);
+        });
+        if (!ok) _loadedKey = null;
+        StateHasChanged();
+    }
+
+    private List<KeyValuePair<string, string>> ParseQuery()
+    {
+        var result = new List<KeyValuePair<string, string>>();
+        var query = Navigation.ToAbsoluteUri(Navigation.Uri).Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var idx = pair.IndexOf('=');
+            var key = Uri.UnescapeDataString((idx < 0 ? pair : pair[..idx]).Replace('+', ' '));
+            var value = idx < 0 ? "" : Uri.UnescapeDataString(pair[(idx + 1)..].Replace('+', ' '));
+            result.Add(new(key, value));
+        }
+        return result;
+    }
+}

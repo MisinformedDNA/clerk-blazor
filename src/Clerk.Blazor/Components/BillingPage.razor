@@ -1,0 +1,415 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@using Clerk.Blazor.Internal
+
+@* Billing content for user and organization profiles: subscriptions, statements, payments and payment methods. *@
+<div class="@RootClass("cb-billing")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (!Auth.IsSignedIn)
+    {
+        <Alert Kind="info" Message="@L.BillingSignedInRequired" />
+    }
+    else if (ForOrganization && Auth.OrgId is null)
+    {
+        <Alert Kind="info" Message="@L.BillingNoOrganization" />
+    }
+    else
+    {
+        <div class="cb-tabs" role="tablist" aria-label="@L.BillingTitle">
+            @foreach (var (id, label) in Tabs)
+            {
+                <button type="button" class="cb-tab" role="tab" id="@TabId(id)" aria-selected="@(_tab == id ? "true" : "false")" aria-controls="@PanelId(id)"
+                        tabindex="@(_tab == id ? 0 : -1)" @onclick="() => SelectTabAsync(id)" @onkeydown="e => OnTabKeyAsync(e, id)">@label</button>
+            }
+        </div>
+        <div class="cb-tabpanel" role="tabpanel" id="@PanelId(_tab)" aria-labelledby="@TabId(_tab)">
+            <Alert Message="@GlobalError()" />
+            @switch (_tab)
+            {
+                case "subscriptions":
+                    @Subscriptions
+                    break;
+                case "statements":
+                    @Statements
+                    break;
+                case "payments":
+                    @Payments
+                    break;
+                default:
+                    @PaymentMethods
+                    break;
+            }
+        </div>
+    }
+</div>
+<SubscriptionDetailsDrawer @bind-Open="_detailsOpen" For="@For" OnSubscriptionCancel="LoadSubscriptionAsync" OnSubscriptionChange="LoadSubscriptionAsync" />
+
+@code {
+    private string _tab = "subscriptions";
+    private readonly string _uid = Guid.NewGuid().ToString("N")[..8];
+    private string? _authKey;
+
+    private BillingSubscription? _subscription;
+    private bool _subscriptionLoaded;
+    private bool _detailsOpen;
+    private bool _showPlans;
+
+    private ClerkPage<BillingStatement>? _statements;
+    private int _statementsPage = 1;
+    private ClerkPage<BillingPayment>? _payments;
+    private int _paymentsPage = 1;
+    private ClerkPage<BillingPaymentMethod>? _methods;
+    private bool _adding;
+    private BillingPaymentMethod? _confirmRemove;
+    private PaymentElement? _paymentElement;
+
+    /// <summary><c>user</c> (default) or <c>organization</c> (uses the active organization).</summary>
+    [Parameter] public string For { get; set; } = "user";
+    /// <summary>Items per page for statements and payments.</summary>
+    [Parameter] public int PerPage { get; set; } = 10;
+
+    private bool ForOrganization => BillingFormat.IsOrganization(For);
+    private string? OrgId => ForOrganization ? Auth.OrgId : null;
+    private string AuthKey => $"{Auth.UserId}|{OrgId}";
+
+    private IEnumerable<(string Id, string Label)> Tabs =>
+    [
+        ("subscriptions", L.BillingSubscriptions),
+        ("statements", L.Statements),
+        ("payments", L.Payments),
+        ("methods", L.PaymentMethods),
+    ];
+
+    private string TabId(string id) => $"cb-billing-{_uid}-tab-{id}";
+    private string PanelId(string id) => $"cb-billing-{_uid}-panel-{id}";
+
+    protected override Task OnInitializedAsync() => ReloadIfAuthChangedAsync();
+
+    protected override void OnClerkStateChanged(ClerkState state)
+    {
+        _ = ReloadIfAuthChangedAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReloadIfAuthChangedAsync()
+    {
+        if (AuthKey == _authKey) return;
+        _authKey = AuthKey;
+        _subscription = null;
+        _subscriptionLoaded = false;
+        _statements = null;
+        _payments = null;
+        _methods = null;
+        _statementsPage = _paymentsPage = 1;
+        await LoadTabAsync();
+    }
+
+    private bool CanLoad => Auth.IsSignedIn && (!ForOrganization || Auth.OrgId is not null);
+
+    private async Task SelectTabAsync(string id)
+    {
+        if (_tab == id) return;
+        _tab = id;
+        Error = null;
+        await LoadTabAsync();
+    }
+
+    private async Task OnTabKeyAsync(KeyboardEventArgs e, string id)
+    {
+        var ids = Tabs.Select(t => t.Id).ToList();
+        var i = ids.IndexOf(id);
+        var next = e.Key switch
+        {
+            "ArrowRight" => ids[(i + 1) % ids.Count],
+            "ArrowLeft" => ids[(i - 1 + ids.Count) % ids.Count],
+            "Home" => ids[0],
+            "End" => ids[^1],
+            _ => null,
+        };
+        if (next is not null) await SelectTabAsync(next);
+    }
+
+    private Task LoadTabAsync() => _tab switch
+    {
+        "subscriptions" => _subscriptionLoaded ? Task.CompletedTask : LoadSubscriptionAsync(),
+        "statements" => _statements is null ? LoadStatementsAsync(_statementsPage) : Task.CompletedTask,
+        "payments" => _payments is null ? LoadPaymentsAsync(_paymentsPage) : Task.CompletedTask,
+        _ => _methods is null ? LoadMethodsAsync() : Task.CompletedTask,
+    };
+
+    private async Task LoadSubscriptionAsync()
+    {
+        if (!CanLoad) return;
+        await RunAsync(async () => _subscription = await Clerk.Billing.GetSubscriptionAsync(OrgId));
+        _subscriptionLoaded = true;
+        StateHasChanged();
+    }
+
+    private async Task LoadStatementsAsync(int page)
+    {
+        if (!CanLoad) return;
+        _statementsPage = page;
+        await RunAsync(async () => _statements = await Clerk.Billing.GetStatementsAsync(OrgId, page, PerPage));
+    }
+
+    private async Task LoadPaymentsAsync(int page)
+    {
+        if (!CanLoad) return;
+        _paymentsPage = page;
+        await RunAsync(async () => _payments = await Clerk.Billing.GetPaymentAttemptsAsync(OrgId, page, PerPage));
+    }
+
+    private async Task LoadMethodsAsync()
+    {
+        if (!CanLoad) return;
+        await RunAsync(async () => _methods = await Clerk.Billing.GetPaymentMethodsAsync(ForOrganization, 1, 50));
+    }
+
+    private RenderFragment Spinner => @<div class="cb-center" role="status"><span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>;
+
+    private IEnumerable<BillingSubscriptionItem> VisibleItems =>
+        _subscription?.SubscriptionItems.Where(i => i.Status is "active" or "past_due" or "upcoming") ?? [];
+
+    private RenderFragment Subscriptions => __builder =>
+    {
+        if (!_subscriptionLoaded)
+        {
+            @Spinner
+            return;
+        }
+        var items = VisibleItems.ToList();
+        <section class="cb-section" aria-labelledby="@($"{TabId("subscriptions")}-h")">
+            <div class="cb-spread">
+                <h3 class="cb-section__title" id="@($"{TabId("subscriptions")}-h")">@L.Subscription</h3>
+                @if (items.Count > 0)
+                {
+                    <Btn Variant="outline" OnClick="() => _detailsOpen = true">@L.BillingManage</Btn>
+                }
+            </div>
+            @if (items.Count == 0)
+            {
+                <p class="cb-empty">@L.BillingNoSubscription</p>
+            }
+            else
+            {
+                <ul class="cb-list">
+                    @foreach (var item in items)
+                    {
+                        var (text, kind) = BillingFormat.Status(item.Status, L, item.CanceledAt);
+                        <li class="cb-list__item">
+                            <div class="cb-list__main">
+                                <div class="cb-inline">
+                                    <strong>@(item.Plan?.Name)</strong>
+                                    <span class="@BillingFormat.BadgeClass(kind)">@text</span>
+                                    @if (item.IsFreeTrial) { <span class="cb-badge cb-badge--primary">@L.BillingFreeTrial</span> }
+                                </div>
+                                <span class="cb-muted">@ItemSummary(item)</span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (_subscription?.NextPayment is { } next && next.Amount is not null)
+            {
+                <p class="cb-muted">@Format(L.BillingNextPaymentOn, BillingFormat.Money(next.Amount), BillingFormat.Date(next.Date))</p>
+            }
+        </section>
+        <section class="cb-section">
+            <div class="cb-spread">
+                <h3 class="cb-section__title">@L.BillingSwitchPlans</h3>
+                <Btn Variant="ghost" aria-expanded="@(_showPlans ? "true" : "false")" OnClick="() => _showPlans = !_showPlans">@(_showPlans ? L.Close : L.BillingSwitchPlans)</Btn>
+            </div>
+            @if (_showPlans)
+            {
+                <PricingTable For="@For" OnSubscriptionComplete="LoadSubscriptionAsync" />
+            }
+        </section>
+    };
+
+    private string ItemSummary(BillingSubscriptionItem item)
+    {
+        if (item.Plan is null || item.Plan.IsFree) return L.Free;
+        var price = item.PlanPeriod == "annual"
+            ? $"{BillingFormat.Money(item.Plan.AnnualFee ?? item.Plan.Fee)} · {L.Annually}"
+            : $"{BillingFormat.Money(item.Plan.Fee)} · {L.Monthly}";
+        if (item.Status == "upcoming") return $"{price} · {Format(L.BillingStartsOn, BillingFormat.Date(item.PeriodStart))}";
+        if (item.PeriodEnd is null) return price;
+        var end = Format(item.CanceledAt is not null ? L.EndsOn : item.IsFreeTrial ? L.BillingTrialEndsOn : L.RenewsOn, BillingFormat.Date(item.PeriodEnd));
+        return $"{price} · {end}";
+    }
+
+    private RenderFragment Statements => __builder =>
+    {
+        if (_statements is null)
+        {
+            @Spinner
+            return;
+        }
+        if (_statements.Data.Count == 0)
+        {
+            <p class="cb-empty">@L.BillingNoStatements</p>
+            return;
+        }
+        <div class="cb-table-wrap">
+            <table class="cb-table">
+                <caption class="cb-visually-hidden">@L.Statements</caption>
+                <thead><tr><th scope="col">@L.BillingDate</th><th scope="col">@L.BillingStatus</th><th scope="col" class="cb-num">@L.BillingTotal</th></tr></thead>
+                <tbody>
+                    @foreach (var s in _statements.Data)
+                    {
+                        var (text, kind) = BillingFormat.Status(s.Status, L);
+                        <tr>
+                            <td>@BillingFormat.Date(s.Timestamp)</td>
+                            <td><span class="@BillingFormat.BadgeClass(kind)">@text</span></td>
+                            <td class="cb-num">@BillingFormat.Money(s.Totals?.GrandTotal)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <Pager Page="_statementsPage" PageSize="PerPage" TotalCount="_statements.TotalCount" PageChanged="LoadStatementsAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+    };
+
+    private RenderFragment Payments => __builder =>
+    {
+        if (_payments is null)
+        {
+            @Spinner
+            return;
+        }
+        if (_payments.Data.Count == 0)
+        {
+            <p class="cb-empty">@L.BillingNoPayments</p>
+            return;
+        }
+        <div class="cb-table-wrap">
+            <table class="cb-table">
+                <caption class="cb-visually-hidden">@L.Payments</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@L.BillingDate</th>
+                        <th scope="col">@L.BillingPlan</th>
+                        <th scope="col">@L.BillingPaymentMethod</th>
+                        <th scope="col">@L.BillingStatus</th>
+                        <th scope="col" class="cb-num">@L.BillingAmount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _payments.Data)
+                    {
+                        var (text, kind) = BillingFormat.Status(p.Status, L);
+                        <tr>
+                            <td>@BillingFormat.Date(p.PaidAt ?? p.FailedAt ?? p.UpdatedAt)</td>
+                            <td>@(p.SubscriptionItem?.Plan?.Name ?? "—")</td>
+                            <td>@(p.PaymentMethod is { } m ? BillingFormat.Card(m, L) : "—")</td>
+                            <td><span class="@BillingFormat.BadgeClass(kind)">@text</span></td>
+                            <td class="cb-num">@BillingFormat.Money(p.Amount)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <Pager Page="_paymentsPage" PageSize="PerPage" TotalCount="_payments.TotalCount" PageChanged="LoadPaymentsAsync" PreviousText="@L.Previous" NextText="@L.Next" />
+    };
+
+    private RenderFragment PaymentMethods => __builder =>
+    {
+        if (_methods is null)
+        {
+            @Spinner
+            return;
+        }
+        <section class="cb-section">
+            @if (_methods.Data.Count == 0 && !_adding)
+            {
+                <p class="cb-empty">@L.BillingNoPaymentMethods</p>
+            }
+            else if (_methods.Data.Count > 0)
+            {
+                <ul class="cb-list">
+                    @foreach (var m in _methods.Data)
+                    {
+                        var expiry = BillingFormat.Expiry(m);
+                        var expired = m.Status == "expired";
+                        <li class="cb-list__item">
+                            <div class="cb-list__main">
+                                <div class="cb-inline">
+                                    <strong>@BillingFormat.Card(m, L)</strong>
+                                    @if (m.IsDefault) { <span class="cb-badge cb-badge--primary">@L.Default</span> }
+                                    @if (expired) { <span class="cb-badge cb-badge--danger">@L.BillingExpired</span> }
+                                </div>
+                                @if (expiry is not null) { <span class="cb-muted">@Format(L.BillingCardExpires, expiry)</span> }
+                            </div>
+                            @if (_confirmRemove?.Id == m.Id)
+                            {
+                                <div class="cb-list__actions" role="group" aria-label="@L.Remove">
+                                    <span class="cb-text">@Format(L.BillingRemovePaymentMethodConfirm, BillingFormat.Card(m, L))</span>
+                                    <Btn Variant="ghost" OnClick="() => _confirmRemove = null">@L.Cancel</Btn>
+                                    <Btn Variant="danger" Busy="Busy" OnClick="() => RemoveAsync(m)">@L.Remove</Btn>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="cb-list__actions">
+                                    @if (!m.IsDefault && !expired)
+                                    {
+                                        <Btn Variant="ghost" Disabled="Busy" OnClick="() => MakeDefaultAsync(m)">@L.MakeDefault</Btn>
+                                    }
+                                    @if (m.IsRemovable)
+                                    {
+                                        <Btn Variant="danger-outline" Disabled="Busy" OnClick="() => _confirmRemove = m">@L.Remove</Btn>
+                                    }
+                                </div>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+            @if (_adding)
+            {
+                <div class="cb-panel">
+                    <h3 class="cb-panel__title">@L.AddPaymentMethod</h3>
+                    <PaymentElement @ref="_paymentElement" ForOrganization="ForOrganization" />
+                    <div class="cb-actions">
+                        <Btn Variant="ghost" Disabled="Busy" OnClick="() => _adding = false">@L.Cancel</Btn>
+                        <Btn Busy="Busy" OnClick="AddAsync">@L.Save</Btn>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="cb-actions">
+                    <Btn Variant="outline" OnClick="() => { _adding = true; Error = null; }">@L.AddPaymentMethod</Btn>
+                </div>
+            }
+        </section>
+    };
+
+    private async Task AddAsync()
+    {
+        if (_paymentElement is null) return;
+        var ok = await RunAsync(async () =>
+        {
+            var token = await _paymentElement.SubmitAsync();
+            await Clerk.Billing.AddPaymentMethodAsync(token, ForOrganization);
+        });
+        if (ok)
+        {
+            _adding = false;
+            await LoadMethodsAsync();
+        }
+    }
+
+    private async Task MakeDefaultAsync(BillingPaymentMethod method)
+    {
+        if (await RunAsync(() => Clerk.Billing.MakeDefaultPaymentMethodAsync(method, OrgId))) await LoadMethodsAsync();
+    }
+
+    private async Task RemoveAsync(BillingPaymentMethod method)
+    {
+        if (await RunAsync(() => Clerk.Billing.RemovePaymentMethodAsync(method, OrgId)))
+        {
+            _confirmRemove = null;
+            await LoadMethodsAsync();
+        }
+    }
+}

@@ -1,0 +1,21 @@
+@page "/tasks/choose-organization"
+@page "/tasks/reset-password"
+@page "/tasks/setup-mfa"
+@page "/tasks"
+
+<PageTitle>Finish signing in</PageTitle>
+<h1 class="visually-hidden">Finish signing in</h1>
+
+<div class="auth-page">
+    @switch (Clerk.State.Session?.CurrentTask?.Key)
+    {
+        case "choose-organization": <TaskChooseOrganization />; break;
+        case "reset-password": <TaskResetPassword />; break;
+        case "setup-mfa": <TaskSetupMfa />; break;
+        default: <ClerkLoaded><p>Nothing left to do. <a href="">Continue</a></p></ClerkLoaded>; break;
+    }
+</div>
+
+@code {
+    [Inject] private ClerkService Clerk { get; set; } = default!;
+}

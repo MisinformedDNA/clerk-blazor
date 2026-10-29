@@ -1,0 +1,38 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@using Clerk.Blazor.Internal
+
+@* Opens the checkout drawer for a plan (<CheckoutButton />). Signed-out users are sent to sign in. *@
+@if (ChildContent is not null)
+{
+    <span class="cb-trigger" @onclick="OpenAsync" @attributes="AdditionalAttributes">@ChildContent</span>
+}
+else
+{
+    <button type="button" class="@RootClass("cb-btn cb-btn--primary")" style="@RootStyle" data-cb-theme="@ThemeAttr" @onclick="OpenAsync" @attributes="AdditionalAttributes">@L.Subscribe</button>
+}
+<CheckoutDrawer @bind-Open="_open" PlanId="@PlanId" PlanPeriod="@PlanPeriod" For="@For" Class="@DrawerClass"
+                NewSubscriptionRedirectUrl="@NewSubscriptionRedirectUrl" OnSubscriptionComplete="OnSubscriptionComplete" />
+
+@code {
+    private bool _open;
+
+    [Parameter, EditorRequired] public string PlanId { get; set; } = "";
+    /// <summary><c>month</c> (default) or <c>annual</c>.</summary>
+    [Parameter] public string PlanPeriod { get; set; } = "month";
+    /// <summary><c>user</c> (default) or <c>organization</c>. Organization checkouts use the active organization.</summary>
+    [Parameter] public string For { get; set; } = "user";
+    [Parameter] public string? NewSubscriptionRedirectUrl { get; set; }
+    [Parameter] public EventCallback OnSubscriptionComplete { get; set; }
+    /// <summary>Extra CSS class for the checkout drawer.</summary>
+    [Parameter] public string? DrawerClass { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private void OpenAsync()
+    {
+        if (!Auth.IsSignedIn) { Clerk.RedirectToSignIn(); return; }
+        if (BillingFormat.IsOrganization(For) && Auth.OrgId is null)
+            throw new InvalidOperationException("<CheckoutButton For=\"organization\"> requires an active organization.");
+        _open = true;
+    }
+}

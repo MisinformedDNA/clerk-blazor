@@ -1,0 +1,99 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<div class="@RootClass("cb-user-account")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (State.User is { } user)
+    {
+        <section class="cb-section">
+            <h2 class="cb-section__title">@L.ProfileSection</h2>
+            <div class="cb-section__body">
+                <div class="cb-person"><Avatar ImageUrl="@user.ImageUrl" Name="@user.DisplayName" Size="56" /><span class="cb-person__name">@user.DisplayName</span></div>
+                @if (_editingName)
+                {
+                    <form class="cb-form" @onsubmit="SaveNameAsync" @onsubmit:preventDefault>
+                        @if (Env.Attribute("first_name").Enabled) { <Field Label="@L.FirstName" @bind-Value="_firstName" Required="@(Env.Attribute("first_name").Required)" Autocomplete="given-name" Disabled="Busy" /> }
+                        @if (Env.Attribute("last_name").Enabled) { <Field Label="@L.LastName" @bind-Value="_lastName" Required="@(Env.Attribute("last_name").Required)" Autocomplete="family-name" Disabled="Busy" /> }
+                        <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="() => _editingName = false">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Save</Btn></div>
+                    </form>
+                }
+                else if (Env.Attribute("first_name").Enabled || Env.Attribute("last_name").Enabled)
+                { <button type="button" class="cb-link" disabled="@Busy" @onclick="EditName">@L.UpdateProfile</button> }
+                <div class="cb-inline">
+                    <label class="cb-btn cb-btn--outline">@L.UploadImage<input type="file" class="cb-visually-hidden" accept="image/*" @key="_imageVersion" disabled="@Busy" @ref="_imageInput" @onchange="UploadImageAsync" /></label>
+                    @if (user.HasImage) { <UserConfirmAction Label="@L.RemoveImage" Disabled="Busy" OnConfirm="() => MutateAsync(Clerk.User.RemoveProfileImageAsync)" /> }
+                </div>
+            </div>
+        </section>
+        @if (Env.Attribute("username").Enabled)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.Username</h2><div class="cb-section__body">
+                @if (_editingUsername)
+                {
+                    <form class="cb-form" @onsubmit="SaveUsernameAsync" @onsubmit:preventDefault>
+                        <Field Label="@L.Username" @bind-Value="_username" Required="@(Env.Attribute("username").Required)" Autocomplete="username" Disabled="Busy" />
+                        <div class="cb-actions"><Btn Variant="outline" Disabled="Busy" OnClick="() => _editingUsername = false">@L.Cancel</Btn><Btn Type="submit" Busy="Busy">@L.Save</Btn></div>
+                    </form>
+                }
+                else { <span>@user.Username</span><button type="button" class="cb-link" disabled="@Busy" @onclick="EditUsername">@L.UpdateProfile</button> }
+            </div></section>
+        }
+        @if (Env.Attribute("email_address").Enabled || user.EmailAddresses.Count > 0)
+        { <section class="cb-section"><h2 class="cb-section__title">@L.EmailAddresses</h2><div class="cb-section__body"><UserContactMethods /></div></section> }
+        @if (Env.Attribute("phone_number").Enabled)
+        { <section class="cb-section"><h2 class="cb-section__title">@L.PhoneNumbers</h2><div class="cb-section__body"><UserContactMethods Phone="true" /></div></section> }
+        @if (user.ExternalAccounts.Count > 0 || Env.SocialProviders.Count > 0)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.ConnectedAccounts</h2><div class="cb-section__body">
+                <ul class="cb-list">
+                    @foreach (var account in user.ExternalAccounts)
+                    {
+                        <li class="cb-list__item" @key="account.Id">
+                            <div class="cb-list__main"><div class="cb-person__text"><span class="cb-person__name">@ProviderName(account.Provider)</span><span class="cb-person__sub">@(account.EmailAddress ?? account.Username)</span></div></div>
+                            <div class="cb-list__actions">
+                                @if (account.Verification?.Error is not null || account.Verification?.Status is "failed" or "expired" or "unverified")
+                                { <button type="button" class="cb-link" disabled="@Busy" @onclick="() => ReconnectAsync(account.Id)">@L.Reconnect</button> }
+                                <UserConfirmAction Label="@L.Remove" Disabled="Busy" OnConfirm="() => MutateAsync(() => Clerk.User.RemoveExternalAccountAsync(account.Id))" />
+                            </div>
+                        </li>
+                    }
+                </ul>
+                @foreach (var provider in Env.SocialProviders.Where(p => !user.ExternalAccounts.Any(a => a.Provider == p.Strategy || "oauth_" + a.Provider == p.Strategy)))
+                { <button type="button" class="cb-link" disabled="@Busy" @onclick="() => ConnectAsync(provider.Strategy)">@Format(L.ContinueWith, provider.Name)</button> }
+            </div></section>
+        }
+        @if (user.EnterpriseAccounts.Count > 0)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.EnterpriseAccounts</h2><div class="cb-section__body"><ul class="cb-list">
+                @foreach (var account in user.EnterpriseAccounts)
+                { <li class="cb-list__item"><div class="cb-person__text"><span class="cb-person__name">@(account.Name ?? account.Provider)</span><span class="cb-person__sub">@account.EmailAddress</span></div></li> }
+            </ul></div></section>
+        }
+        @if (user.Web3Wallets.Count > 0)
+        {
+            <section class="cb-section"><h2 class="cb-section__title">@L.Web3Wallets</h2><div class="cb-section__body"><ul class="cb-list">
+                @foreach (var wallet in user.Web3Wallets)
+                { <li class="cb-list__item" @key="wallet.Id"><span class="cb-secret cb-mono">@wallet.Web3Wallet</span><UserConfirmAction Label="@L.Remove" Disabled="Busy" OnConfirm="() => MutateAsync(() => Clerk.User.RemoveWeb3WalletAsync(wallet.Id))" /></li> }
+            </ul></div></section>
+        }
+    }
+    <Alert Message="@GlobalError()" />
+</div>
+
+@code {
+    private bool _editingName, _editingUsername;
+    private string _firstName = "", _lastName = "", _username = "";
+    private ElementReference _imageInput;
+    private int _imageVersion;
+    private Task<bool> MutateAsync(Func<Task> action) => RunAsync(action);
+    private void EditName() { _firstName = State.User?.FirstName ?? ""; _lastName = State.User?.LastName ?? ""; _editingName = true; Error = null; }
+    private void EditUsername() { _username = State.User?.Username ?? ""; _editingUsername = true; Error = null; }
+    private async Task SaveNameAsync()
+    {
+        if (await RunAsync(() => Clerk.User.UpdateAsync(firstName: Env.Attribute("first_name").Enabled ? _firstName.Trim() : null, lastName: Env.Attribute("last_name").Enabled ? _lastName.Trim() : null))) _editingName = false;
+    }
+    private async Task SaveUsernameAsync() { if (await RunAsync(() => Clerk.User.UpdateAsync(username: _username.Trim()))) _editingUsername = false; }
+    private async Task UploadImageAsync() { await RunAsync(() => Clerk.User.SetProfileImageAsync(_imageInput)); _imageVersion++; }
+    private string ProviderName(string provider) => Env.SocialProviders.FirstOrDefault(p => p.Strategy == provider || p.Strategy == "oauth_" + provider)?.Name ?? provider;
+    private Task<bool> ConnectAsync(string strategy) => RunAsync(async () => { if (await Clerk.User.ConnectExternalAccountAsync(strategy, Navigation.Uri) is { } url) Go(url); });
+    private Task<bool> ReconnectAsync(string id) => RunAsync(async () => { if (await Clerk.User.ReauthorizeExternalAccountAsync(id, Navigation.Uri) is { } url) Go(url); });
+}

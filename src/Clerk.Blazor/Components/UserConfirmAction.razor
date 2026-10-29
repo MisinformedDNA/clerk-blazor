@@ -1,0 +1,22 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<span class="@RootClass("cb-inline")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    @if (_confirm)
+    {
+        <button type="button" class="cb-link cb-link--danger" disabled="@Disabled" @onclick="ConfirmAsync">@L.UserConfirmRemove</button>
+        <button type="button" class="cb-link" disabled="@Disabled" @onclick="() => _confirm = false">@L.Cancel</button>
+    }
+    else
+    {
+        <button type="button" class="cb-link cb-link--danger" disabled="@Disabled" @onclick="() => _confirm = true">@Label</button>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    private bool _confirm;
+    private async Task ConfirmAsync() { await OnConfirm.InvokeAsync(); _confirm = false; }
+}

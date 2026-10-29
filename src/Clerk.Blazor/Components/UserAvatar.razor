@@ -1,0 +1,14 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+<span class="@RootClass("cb-user-avatar")" style="@RootStyle" data-cb-theme="@ThemeAttr" role="@(State.User is null ? null : "img")" aria-label="@State.User?.DisplayName" @attributes="AdditionalAttributes">
+    @if (State.User is { } user)
+    {
+        <Avatar ImageUrl="@user.ImageUrl" Name="@user.DisplayName" Size="Size" Shape="@(Rounded ? "circle" : "square")" Decorative="true" />
+    }
+</span>
+
+@code {
+    [Parameter] public int Size { get; set; } = 32;
+    [Parameter] public bool Rounded { get; set; } = true;
+}

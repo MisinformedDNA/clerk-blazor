@@ -1,6 +1,3 @@
-@inject ClerkAuthService ClerkAuth
-@inject AuthenticationStateProvider AuthProvider
-
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">Sample</a>
@@ -32,22 +29,37 @@
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Protected
             </NavLink>
         </div>
-        <AuthorizeView>
-            <Authorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="logout">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="components">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Components
+            </NavLink>
+        </div>
+        <Show When="ShowWhen.SignedIn">
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="user">
+                    <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Account
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="organization">
+                    <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Organization
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <SignOutButton>
+                    <span class="nav-link">
                         <span class="bi bi-box-arrow-right-nav-menu" aria-hidden="true"></span> Sign out
-                    </NavLink>
-                </div>
-            </Authorized>
-            <NotAuthorized>
-                <div class="nav-item px-3">
-                    <button class="nav-link btn btn-link w-100 text-start" @onclick="HandleSignIn">
-                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Sign in
-                    </button>
-                </div>
-            </NotAuthorized>
-        </AuthorizeView>
+                    </span>
+                </SignOutButton>
+            </div>
+        </Show>
+        <Show When="ShowWhen.SignedOut">
+            <div class="nav-item px-3">
+                <SignInButton Mode="ClerkButtonMode.Modal">
+                    <span class="nav-link"><span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Sign in</span>
+                </SignInButton>
+            </div>
+        </Show>
     </nav>
 </div>
 
@@ -56,16 +68,5 @@
 
     private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
 
-    private void ToggleNavMenu()
-    {
-        collapseNavMenu = !collapseNavMenu;
-    }
-
-    private async Task HandleSignIn()
-    {
-        await ClerkAuth.SignInAsync();
-
-        if (AuthProvider is ClerkAuthenticationStateProvider clerkProvider)
-            await clerkProvider.ForceRefreshAsync();
-    }
+    private void ToggleNavMenu() => collapseNavMenu = !collapseNavMenu;
 }
