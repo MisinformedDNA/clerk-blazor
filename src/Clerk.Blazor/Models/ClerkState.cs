@@ -119,7 +119,7 @@ public sealed record ClerkAuth
         {
             ReverificationLevel.FirstFactor => first != -1 && after > first,
             ReverificationLevel.SecondFactor => second != -1 ? after > second : first != -1 && after > first,
-            _ => second == -1 ? first != -1 && after > first : after > first && after > second,
+            _ => first != -1 && after > first && (second == -1 || after > second),
         };
     }
 }

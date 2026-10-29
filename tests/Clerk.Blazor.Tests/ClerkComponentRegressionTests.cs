@@ -66,4 +66,14 @@ public class ClerkComponentRegressionTests
         });
         Assert.That(html.Contains("authorized"), Is.EqualTo(expected));
     }
+
+    [Test]
+    public void Show_RejectsMisspelledParameter()
+    {
+        var show = new Show();
+        Assert.Throws<InvalidOperationException>(() => ParameterView.FromDictionary(new Dictionary<string, object?>
+        {
+            ["Permision"] = "org:sys_billing:manage",
+        }).SetParameterProperties(show));
+    }
 }

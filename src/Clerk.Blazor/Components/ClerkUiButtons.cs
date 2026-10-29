@@ -6,7 +6,7 @@ using Microsoft.JSInterop;
 namespace Clerk.Blazor.Components;
 
 /// <summary>A Blazor-owned trigger for Clerk's shared modal layer. Never creates a Blazor modal.</summary>
-public abstract class ClerkUiButton : ClerkComponentBase, IAsyncDisposable
+public abstract class ClerkUiButton : ClerkRenderedComponentBase, IAsyncDisposable
 {
     private readonly string _owner = Guid.NewGuid().ToString("N");
     private DotNetObjectReference<ClerkUiButton>? _reference;

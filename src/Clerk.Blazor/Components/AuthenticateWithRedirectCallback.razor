@@ -1,12 +1,12 @@
 @namespace Clerk.Blazor.Components
-@inherits ClerkComponentBase
+@inherits ClerkRenderedComponentBase
 
 @* Completes OAuth / SAML / email-link redirects (<AuthenticateWithRedirectCallback>). Mount it on your SSO callback route. *@
-<div class="@RootClass("cb-callback")" style="@RootStyle" data-cb-theme="@ThemeAttr" role="status" aria-live="polite">
+<div @attributes="AdditionalAttributes" class="@RootClass("cb-callback")" style="@RootStyle" data-cb-theme="@ThemeAttr" role="status" aria-live="polite">
     @if (Error is not null)
     {
         <Clerk.Blazor.Internal.Alert Message="@(GlobalError() ?? Error.Message)" />
-        <a class="cb-link" href="@Clerk.Options.SignInUrl.TrimStart('/')">@L.SignInLink</a>
+        <a class="cb-link" href="@((SignInUrl ?? Clerk.Options.SignInUrl).TrimStart('/'))">@L.SignInLink</a>
     }
     else
     {

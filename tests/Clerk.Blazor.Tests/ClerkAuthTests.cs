@@ -77,6 +77,13 @@ public class ClerkAuthTests
     }
 
     [Test]
+    public void Has_Reverification_MultiFactorRequiresVerifiedFirstFactor()
+    {
+        var auth = SignedIn() with { FactorVerificationAge = [-1, 5] };
+        Assert.That(auth.Has(new ClerkCheck { Reverification = new(ReverificationLevel.MultiFactor, 10) }), Is.False);
+    }
+
+    [Test]
     public void Has_Feature_IgnoresMissingClaims()
     {
         var auth = SignedIn() with { SessionClaims = JsonDocument.Parse("{}").RootElement };

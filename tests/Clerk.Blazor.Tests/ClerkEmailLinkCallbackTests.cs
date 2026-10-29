@@ -64,6 +64,31 @@ public class ClerkEmailLinkCallbackTests
         Assert.That(bridge.Parameters.GetProperty("redirectUrlComplete").GetString(), Is.EqualTo("/forced"));
     }
 
+    [Test]
+    public async Task Component_ErrorLinkUsesSignInUrlOverride()
+    {
+        var bridge = new EmailLinkBridge { Fail = true };
+        var clerk = new ClerkService(bridge, new FakeNavigationManager(),
+            Options.Create(new ClerkOptions { PublishableKey = "pk_test_Y2xlcmsuZXhhbXBsZS5jb20k", SignInUrl = "/global-sign-in" }));
+        using var services = new ServiceCollection().AddLogging().AddSingleton(clerk)
+            .AddSingleton<NavigationManager>(new FakeNavigationManager()).BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            CallbackHarness? callback = null;
+            var root = await renderer.RenderComponentAsync<CallbackHarness>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                ["EmailLink"] = true,
+                ["SignInUrl"] = "/local-sign-in",
+                ["Capture"] = (Action<CallbackHarness>)(instance => callback = instance),
+            }));
+            await callback!.CompleteAsync();
+            return root.ToHtmlString();
+        });
+        Assert.That(html, Does.Contain("href=\"local-sign-in\""));
+        Assert.That(html, Does.Not.Contain("global-sign-in"));
+    }
+
     public sealed class CallbackHarness : AuthenticateWithRedirectCallback
     {
         [Parameter] public Action<CallbackHarness>? Capture { get; set; }
@@ -78,6 +103,7 @@ public class ClerkEmailLinkCallbackTests
     private sealed class EmailLinkBridge : IJSRuntime, IJSObjectReference
     {
         public JsonElement Parameters { get; private set; }
+        public bool Fail { get; init; }
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             object result;
@@ -85,6 +111,7 @@ public class ClerkEmailLinkCallbackTests
             else if (identifier == "load") result = JsonSerializer.Deserialize<JsonElement>(TestClerk.SignedInSnapshot);
             else if (identifier == "handleEmailLinkVerification")
             {
+                if (Fail) throw new JSException("expired");
                 Parameters = JsonSerializer.SerializeToElement(args![0]);
                 result = new InteropResult();
             }

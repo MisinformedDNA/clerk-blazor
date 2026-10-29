@@ -12,12 +12,6 @@ public abstract class ClerkComponentBase : ComponentBase, IDisposable
     [Inject] protected ClerkService Clerk { get; set; } = default!;
     [Inject] protected NavigationManager Navigation { get; set; } = default!;
 
-    /// <summary>Extra CSS class for the component root.</summary>
-    [Parameter] public string? Class { get; set; }
-
-    /// <summary>Additional attributes applied to the component root.</summary>
-    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
-
     protected ClerkState State => Clerk.State;
     protected ClerkAuth Auth => Clerk.State.Auth;
     protected ClerkEnvironment Env => Clerk.State.Environment ?? new ClerkEnvironment();
@@ -80,10 +74,6 @@ public abstract class ClerkComponentBase : ComponentBase, IDisposable
     private static bool Same(string a, string b) =>
         string.Equals(a.Replace("_", ""), b.Replace("_", ""), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>CSS class for the root element: <c>cb-root {block} {Class}</c>.</summary>
-    protected string RootClass(string block) =>
-        string.Join(' ', new[] { "cb-root", block, Clerk.Options.Appearance.RootClass, Class }.Where(s => !string.IsNullOrWhiteSpace(s)));
-
     protected string? RootStyle => Clerk.Options.Appearance.ToStyle();
     protected string? ThemeAttr => Clerk.Options.Appearance.ThemeAttribute;
 
@@ -96,4 +86,22 @@ public abstract class ClerkComponentBase : ComponentBase, IDisposable
         Clerk.StateChanged -= HandleStateChanged;
         GC.SuppressFinalize(this);
     }
+}
+
+/// <summary>
+/// Base class for Clerk components that render a root element. Only these accept
+/// <see cref="Class"/> and arbitrary root attributes, so non-rendering gates such as
+/// <see cref="Show"/> reject misspelled parameters instead of silently ignoring them.
+/// </summary>
+public abstract class ClerkRenderedComponentBase : ClerkComponentBase
+{
+    /// <summary>Extra CSS class for the component root.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Additional attributes applied to the component root.</summary>
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+
+    /// <summary>CSS class for the root element: <c>cb-root {block} {Class}</c>.</summary>
+    protected string RootClass(string block) =>
+        string.Join(' ', new[] { "cb-root", block, Clerk.Options.Appearance.RootClass, Class }.Where(s => !string.IsNullOrWhiteSpace(s)));
 }

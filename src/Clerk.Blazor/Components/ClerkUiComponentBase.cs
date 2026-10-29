@@ -6,7 +6,7 @@ using Microsoft.JSInterop;
 namespace Clerk.Blazor.Components;
 
 /// <summary>Lifecycle boundary between a Blazor container and Clerk-owned UI.</summary>
-public abstract class ClerkUiComponentBase : ClerkComponentBase, IAsyncDisposable
+public abstract class ClerkUiComponentBase : ClerkRenderedComponentBase, IAsyncDisposable
 {
     private ElementReference _container;
     private IJSObjectReference? _mount;
