@@ -1,0 +1,22 @@
+@namespace Clerk.Blazor.Internal
+@if (Providers.Count > 0)
+{
+    <div class="cb-social @(Providers.Count > 3 ? "cb-social--grid" : null)">
+        @foreach (var p in Providers)
+        {
+            var compact = Providers.Count > 3;
+            <button type="button" class="cb-btn cb-btn--outline cb-social__btn" disabled="@Disabled"
+                    aria-label="@string.Format(ContinueWith, p.Name)" title="@(compact ? p.Name : null)" @onclick="() => OnSelect.InvokeAsync(p.Strategy)">
+                @if (!string.IsNullOrEmpty(p.LogoUrl)) { <img src="@p.LogoUrl" alt="" width="18" height="18" /> }
+                @if (!compact) { <span>@string.Format(ContinueWith, p.Name)</span> }
+            </button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<ClerkSocialProvider> Providers { get; set; } = [];
+    [Parameter] public string ContinueWith { get; set; } = "Continue with {0}";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<string> OnSelect { get; set; }
+}

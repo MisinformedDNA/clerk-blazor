@@ -1,0 +1,39 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+@* Loads ClerkJS (headless) and cascades ClerkState to descendants. Equivalent to <ClerkProvider>. *@
+<CascadingValue Value="State" IsFixed="false">
+    @if (State.Status == ClerkStatus.Error && FailedContent is not null)
+    {
+        @FailedContent(State.Error)
+    }
+    else
+    {
+        @ChildContent
+    }
+</CascadingValue>
+<Clerk.Blazor.Internal.ReverificationDialog />
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional content rendered instead of <see cref="ChildContent"/> when ClerkJS cannot load.</summary>
+    [Parameter] public RenderFragment<Exception?>? FailedContent { get; set; }
+
+    /// <summary>Raised once ClerkJS has loaded.</summary>
+    [Parameter] public EventCallback<ClerkState> OnLoaded { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            await Clerk.LoadAsync();
+            await OnLoaded.InvokeAsync(State);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[Clerk.Blazor] Failed to load Clerk: {ex.Message}");
+        }
+    }
+}

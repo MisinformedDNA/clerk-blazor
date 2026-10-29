@@ -1,0 +1,4 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+@if (State.IsLoaded && State.Auth.IsSignedIn) { @ChildContent }
+@code { [Parameter] public RenderFragment? ChildContent { get; set; } }

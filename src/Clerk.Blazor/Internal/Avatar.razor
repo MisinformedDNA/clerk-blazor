@@ -1,0 +1,22 @@
+@namespace Clerk.Blazor.Internal
+<span class="cb-avatar cb-avatar--@Shape @Class" style="--cb-avatar-size:@(Size)px" aria-hidden="@(Decorative ? "true" : null)">
+    @if (!string.IsNullOrEmpty(ImageUrl))
+    {
+        <img src="@ImageUrl" alt="@(Decorative ? "" : Name)" loading="lazy" />
+    }
+    else
+    {
+        <span class="cb-avatar__initials">@Initials</span>
+    }
+</span>
+
+@code {
+    [Parameter] public string? ImageUrl { get; set; }
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public int Size { get; set; } = 32;
+    [Parameter] public string Shape { get; set; } = "circle";
+    [Parameter] public bool Decorative { get; set; } = true;
+    [Parameter] public string? Class { get; set; }
+
+    private string Initials => string.Concat((Name ?? "?").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+}

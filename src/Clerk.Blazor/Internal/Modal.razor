@@ -1,0 +1,89 @@
+@namespace Clerk.Blazor.Internal
+@implements IAsyncDisposable
+@inject ClerkService Clerk
+
+@if (Open)
+{
+    <dialog @ref="_dialog" class="cb-root cb-dialog @(Drawer ? "cb-dialog--drawer" : null) @Class" style="@Clerk.Options.Appearance.ToStyle()"
+            data-cb-theme="@Clerk.Options.Appearance.ThemeAttribute" aria-labelledby="@(Title is not null ? _titleId : null)" aria-label="@(Title is null ? AriaLabel : null)">
+        <div class="cb-dialog__panel">
+            @if (Title is not null || ShowClose)
+            {
+                <div class="cb-dialog__header">
+                    @if (Title is not null) { <h2 id="@_titleId" class="cb-dialog__title">@Title</h2> }
+                    @if (ShowClose)
+                    {
+                        <button type="button" class="cb-dialog__close cb-icon-btn" aria-label="@CloseLabel" @onclick="CloseAsync">
+                            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                        </button>
+                    }
+                </div>
+            }
+            <div class="cb-dialog__content">@ChildContent</div>
+        </div>
+    </dialog>
+}
+
+@code {
+    private readonly string _titleId = "cb-dlg-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _dialog;
+    private IJSObjectReference? _handle;
+    private DotNetObjectReference<Modal>? _ref;
+    private bool _shown;
+
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? AriaLabel { get; set; }
+    [Parameter] public bool Drawer { get; set; }
+    [Parameter] public bool ShowClose { get; set; } = true;
+    [Parameter] public bool Dismissible { get; set; } = true;
+    [Parameter] public string CloseLabel { get; set; } = "Close";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Open && !_shown)
+        {
+            _shown = true;
+            _ref ??= DotNetObjectReference.Create(this);
+            var module = await Clerk.BridgeModuleAsync();
+            _handle = await module.InvokeAsync<IJSObjectReference>("showDialog", _dialog, _ref);
+        }
+        else if (!Open && _shown)
+        {
+            await ReleaseAsync();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnEscape()
+    {
+        if (Dismissible) await CloseAsync();
+    }
+
+    public async Task CloseAsync()
+    {
+        await ReleaseAsync();
+        Open = false;
+        await OpenChanged.InvokeAsync(false);
+        await OnClose.InvokeAsync();
+        StateHasChanged();
+    }
+
+    private async Task ReleaseAsync()
+    {
+        _shown = false;
+        if (_handle is null) return;
+        try { await _handle.InvokeVoidAsync("release"); await _handle.DisposeAsync(); } catch (JSDisconnectedException) { }
+        _handle = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await ReleaseAsync();
+        _ref?.Dispose();
+    }
+}

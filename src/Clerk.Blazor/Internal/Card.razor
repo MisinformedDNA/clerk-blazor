@@ -1,0 +1,35 @@
+@namespace Clerk.Blazor.Internal
+@inherits Clerk.Blazor.Components.ClerkComponentBase
+
+<div class="@RootClass("cb-card")" style="@RootStyle" data-cb-theme="@ThemeAttr" @attributes="AdditionalAttributes">
+    <div class="cb-card__body">
+        @if (ShowLogo && !string.IsNullOrEmpty(Env.LogoImageUrl))
+        {
+            <img class="cb-card__logo" src="@Env.LogoImageUrl" alt="@Env.ApplicationName" />
+        }
+        @if (Title is not null)
+        {
+            <header class="cb-card__header">
+                <h1 class="cb-card__title" tabindex="-1">@Title</h1>
+                @if (Subtitle is not null) { <p class="cb-card__subtitle">@Subtitle</p> }
+            </header>
+        }
+        @ChildContent
+    </div>
+    @if (Footer is not null)
+    {
+        <footer class="cb-card__footer">@Footer</footer>
+    }
+    @if (Env.IsDevelopment)
+    {
+        <p class="cb-card__dev">@L.DevelopmentMode</p>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public bool ShowLogo { get; set; } = true;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+}

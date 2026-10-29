@@ -1,0 +1,47 @@
+@namespace Clerk.Blazor.Components
+@inherits ClerkComponentBase
+
+@* Completes OAuth / SAML / email-link redirects (<AuthenticateWithRedirectCallback>). Mount it on your SSO callback route. *@
+<div class="@RootClass("cb-callback")" style="@RootStyle" data-cb-theme="@ThemeAttr" role="status" aria-live="polite">
+    @if (Error is not null)
+    {
+        <Clerk.Blazor.Internal.Alert Message="@(GlobalError() ?? Error.Message)" />
+        <a class="cb-link" href="@Clerk.Options.SignInUrl.TrimStart('/')">@L.SignInLink</a>
+    }
+    else
+    {
+        <span class="cb-spinner cb-spinner--lg" aria-hidden="true"></span>
+        <span class="cb-visually-hidden">@L.Loading</span>
+    }
+</div>
+
+@code {
+    [Parameter] public string? SignInUrl { get; set; }
+    [Parameter] public string? SignUpUrl { get; set; }
+    [Parameter] public string? SignInFallbackRedirectUrl { get; set; }
+    [Parameter] public string? SignUpFallbackRedirectUrl { get; set; }
+    [Parameter] public string? SignInForceRedirectUrl { get; set; }
+    [Parameter] public string? SignUpForceRedirectUrl { get; set; }
+    [Parameter] public string? ContinueSignUpUrl { get; set; }
+    [Parameter] public string? FirstFactorUrl { get; set; }
+    [Parameter] public string? SecondFactorUrl { get; set; }
+    [Parameter] public bool Transferable { get; set; } = true;
+    /// <summary>Handle an email-link verification instead of an OAuth callback.</summary>
+    [Parameter] public bool EmailLink { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await Clerk.LoadAsync();
+        await RunAsync(() => EmailLink
+            ? Clerk.HandleEmailLinkVerificationAsync(SignInFallbackRedirectUrl, SignInForceRedirectUrl)
+            : Clerk.HandleRedirectCallbackAsync(new RedirectCallbackOptions
+            {
+                SignInUrl = SignInUrl, SignUpUrl = SignUpUrl,
+                SignInFallbackRedirectUrl = SignInFallbackRedirectUrl, SignUpFallbackRedirectUrl = SignUpFallbackRedirectUrl,
+                SignInForceRedirectUrl = SignInForceRedirectUrl, SignUpForceRedirectUrl = SignUpForceRedirectUrl,
+                ContinueSignUpUrl = ContinueSignUpUrl, FirstFactorUrl = FirstFactorUrl, SecondFactorUrl = SecondFactorUrl,
+                Transferable = Transferable,
+            }));
+    }
+}

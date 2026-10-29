@@ -1,0 +1,141 @@
+@namespace Clerk.Blazor.Internal
+@inherits Clerk.Blazor.Components.ClerkComponentBase
+
+@* Native replacement for Clerk's reverification modal (useReverification). Registered by ClerkProvider. *@
+<Modal Open="_open" OpenChanged="OpenChanged" Title="@L.ReverifyTitle" CloseLabel="@L.Close" Class="cb-dialog--auth">
+    <p class="cb-text cb-muted">@L.ReverifySubtitle</p>
+    @if (_verification is null)
+    {
+        <div class="cb-center" role="status"><span class="cb-spinner" aria-hidden="true"></span><span class="cb-visually-hidden">@L.Loading</span></div>
+        <Alert Message="@GlobalError()" />
+    }
+    else
+    {
+        <form class="cb-form" @onsubmit="SubmitAsync" @onsubmit:preventDefault novalidate>
+            @if (_factor?.Strategy == "password")
+            {
+                <Field Label="@L.Password" Type="password" @bind-Value="_value" Autocomplete="current-password" Required AutoFocus
+                       Error="@FieldError("password")" ShowLabel="@L.ShowPassword" HideLabel="@L.HidePassword" />
+            }
+            else
+            {
+                <p class="cb-text">@Prompt</p>
+                <Field Label="@(_factor?.Strategy == "backup_code" ? L.BackupCodes : L.Code)" @bind-Value="_value" Autocomplete="one-time-code"
+                       InputMode="@(_factor?.Strategy == "backup_code" ? null : "numeric")" Required AutoFocus Error="@FieldError("code")" />
+            }
+            <Alert Message="@GlobalError("code", "password")" />
+            <Btn Type="submit" Block Busy="Busy">@L.Continue</Btn>
+        </form>
+        @if (_factor?.Strategy is "email_code" or "phone_code")
+        {
+            <div class="cb-center"><ResendButton Text="@L.Resend" Busy="Busy" OnResend="PrepareAsync" /></div>
+        }
+        @foreach (var f in Factors.Where(f => f != _factor))
+        {
+            <button type="button" class="cb-link cb-center" @onclick="() => ChooseAsync(f)">@Label(f)</button>
+        }
+    }
+</Modal>
+
+@code {
+    private bool _open;
+    private TaskCompletionSource<bool>? _tcs;
+    private SessionVerification? _verification;
+    private SignInFactor? _factor;
+    private string? _value;
+
+    private bool SecondStep => _verification?.Status == "needs_second_factor";
+
+    private IEnumerable<SignInFactor> Factors => (SecondStep ? _verification?.SupportedSecondFactors : _verification?.SupportedFirstFactors)?
+        .Where(f => f.Strategy is "password" or "email_code" or "phone_code" or "totp" or "backup_code") ?? [];
+
+    private string Prompt => _factor?.Strategy switch
+    {
+        "totp" => L.TotpPrompt,
+        "backup_code" => L.BackupCodePrompt,
+        _ => Format(L.CodeSentTo, _factor?.SafeIdentifier),
+    };
+
+    private string Label(SignInFactor f) => f.Strategy switch
+    {
+        "password" => L.Password,
+        "totp" => L.UseAuthenticator,
+        "backup_code" => L.UseBackupCode,
+        "phone_code" => L.UseSmsCode,
+        _ => Format(L.CodeSentTo, f.SafeIdentifier).TrimEnd('.'),
+    };
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Clerk.ReverificationHandler ??= HandleAsync;
+    }
+
+    private async Task<bool> HandleAsync(ReverificationRequirement requirement)
+    {
+        _tcs?.TrySetResult(false);
+        var tcs = _tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _verification = null;
+        _factor = null;
+        _value = null;
+        Error = null;
+        _open = true;
+        await InvokeAsync(StateHasChanged);
+        await RunAsync(async () => Apply(await Clerk.Session.StartVerificationAsync(requirement.Level)));
+        await InvokeAsync(StateHasChanged);
+        return await tcs.Task;
+    }
+
+    private void Apply(SessionVerification v)
+    {
+        _verification = v;
+        _value = null;
+        if (v.Status == "complete")
+        {
+            _open = false;
+            _tcs?.TrySetResult(true);
+            return;
+        }
+        var factors = Factors.ToList();
+        _factor = factors.FirstOrDefault(f => f.Strategy is "password" or "totp") ?? factors.FirstOrDefault();
+        if (_factor?.Strategy is "email_code" or "phone_code") _ = PrepareAsync();
+    }
+
+    private Task ChooseAsync(SignInFactor f)
+    {
+        _factor = f;
+        _value = null;
+        Error = null;
+        return f.Strategy is "email_code" or "phone_code" ? PrepareAsync() : Task.CompletedTask;
+    }
+
+    private Task PrepareAsync() => RunAsync(async () =>
+    {
+        if (SecondStep) await Clerk.Session.PrepareSecondFactorVerificationAsync(_factor!);
+        else await Clerk.Session.PrepareFirstFactorVerificationAsync(_factor!);
+    });
+
+    private Task SubmitAsync() => RunAsync(async () =>
+    {
+        var value = _value?.Trim() ?? "";
+        var strategy = _factor!.Strategy;
+        Apply(SecondStep
+            ? await Clerk.Session.AttemptSecondFactorVerificationAsync(strategy, value)
+            : strategy == "password"
+                ? await Clerk.Session.AttemptFirstFactorVerificationAsync(strategy, password: value)
+                : await Clerk.Session.AttemptFirstFactorVerificationAsync(strategy, code: value));
+    });
+
+    private void OpenChanged(bool open)
+    {
+        _open = open;
+        if (!open) _tcs?.TrySetResult(false);
+    }
+
+    public override void Dispose()
+    {
+        if (Clerk.ReverificationHandler == HandleAsync) Clerk.ReverificationHandler = null;
+        _tcs?.TrySetResult(false);
+        base.Dispose();
+    }
+}

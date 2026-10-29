@@ -1,0 +1,37 @@
+@namespace Clerk.Blazor.Internal
+@implements IDisposable
+
+<button type="button" class="cb-link cb-resend" disabled="@(_remaining > 0 || Busy)" @onclick="ResendAsync">
+    @Text@if (_remaining > 0) { <span aria-hidden="true"> (@_remaining)</span> }
+</button>
+
+@code {
+    private int _remaining;
+    private System.Threading.Timer? _timer;
+
+    [Parameter] public string Text { get; set; } = "Resend code";
+    [Parameter] public int Seconds { get; set; } = 30;
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnResend { get; set; }
+
+    protected override void OnInitialized() => Start();
+
+    private void Start()
+    {
+        _remaining = Seconds;
+        _timer?.Dispose();
+        _timer = new System.Threading.Timer(_ => InvokeAsync(() =>
+        {
+            if (--_remaining <= 0) { _remaining = 0; _timer?.Dispose(); }
+            StateHasChanged();
+        }), null, 1000, 1000);
+    }
+
+    private async Task ResendAsync()
+    {
+        await OnResend.InvokeAsync();
+        Start();
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}
