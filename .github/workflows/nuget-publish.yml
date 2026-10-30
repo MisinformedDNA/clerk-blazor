@@ -1,0 +1,136 @@
+name: Publish Clerk.Blazor preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clerk-blazor-0.1.0-preview.1
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.repository == 'MisinformedDNA/clerk-blazor' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # This release changes packaging only; library implementation was tested at 30f77be4.
+          ref: d2edd0c97d18c35f3596242b3b40ae5dbdeb12f7
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.403
+      - name: Test and pack pinned candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD) -ne 'd2edd0c97d18c35f3596242b3b40ae5dbdeb12f7') { throw 'Unexpected source revision.' }
+          '{ "sdk": { "version": "10.0.403", "rollForward": "disable" } }' | Set-Content global.json
+          dotnet test tests/Clerk.Blazor.Tests -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
+          dotnet pack src/Clerk.Blazor/Clerk.Blazor.csproj -c Release -o artifacts/packages --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Package build failed.' }
+      - name: Inspect exact package identity, dependencies and assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $path = 'artifacts/packages/Clerk.Blazor.0.1.0-preview.1.nupkg'
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $path))
+          try {
+            $reader = [IO.StreamReader]::new($zip.GetEntry('Clerk.Blazor.nuspec').Open())
+            try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            $m = $spec.package.metadata
+            if ($m.id -ne 'Clerk.Blazor' -or $m.version -ne '0.1.0-preview.1') { throw 'Incorrect package identity.' }
+            if ($m.repository.commit -ne 'd2edd0c97d18c35f3596242b3b40ae5dbdeb12f7') { throw 'Incorrect package revision.' }
+            if ($m.repository.url -ne 'https://github.com/MisinformedDNA/clerk-blazor') { throw 'Incorrect repository URL.' }
+            if ($m.license.InnerText -ne 'MIT' -or $m.readme -ne 'README.md') { throw 'Incorrect package documentation.' }
+            $group = $m.dependencies.group
+            if (@($group).Count -ne 1 -or $group.targetFramework -ne 'net10.0') { throw 'Unexpected target framework.' }
+            $deps = @($group.dependency)
+            $ids = @($deps | ForEach-Object { $_.id } | Sort-Object)
+            if (($ids -join ',') -ne 'Microsoft.AspNetCore.Components.Authorization,Microsoft.AspNetCore.Components.WebAssembly') { throw 'Unexpected dependencies.' }
+            if (@($deps | Where-Object version -ne '10.0.2').Count -ne 0) { throw 'Unexpected dependency version.' }
+            foreach ($entry in @('lib/net10.0/Clerk.Blazor.dll', 'buildTransitive/Clerk.Blazor.props', 'build/Microsoft.AspNetCore.StaticWebAssets.props')) {
+              if (-not $zip.GetEntry($entry)) { throw "Missing $entry" }
+            }
+            foreach ($pair in @(@('README.md', 'README.md'), @('LICENSE', 'LICENSE'), @('staticwebassets/js/clerk-blazor.js', 'src/Clerk.Blazor/wwwroot/js/clerk-blazor.js'), @('staticwebassets/clerk-blazor.css', 'src/Clerk.Blazor/wwwroot/clerk-blazor.css'))) {
+              $stream = $zip.GetEntry($pair[0]).Open()
+              try {
+                $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))
+                if ($hash -ne (Get-FileHash $pair[1]).Hash) { throw "Content mismatch: $($pair[0])" }
+              } finally { $stream.Dispose() }
+            }
+          } finally { $zip.Dispose() }
+          Get-FileHash $path -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clerk-blazor-0.1.0-preview.1
+          path: artifacts/packages/Clerk.Blazor.0.1.0-preview.1.nupkg
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: nuget.org
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: clerk-blazor-0.1.0-preview.1
+          path: artifacts/packages
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.403
+      - name: Require unused version and configured NuGet profile
+        shell: pwsh
+        env:
+          NUGET_USER: ${{ secrets.NUGET_USER }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_USER)) { throw 'Configure the NUGET_USER environment secret with the NuGet profile name.' }
+          $response = Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/clerk.blazor/index.json' -SkipHttpErrorCheck
+          if ($response.StatusCode -eq 200) {
+            if (($response.Content | ConvertFrom-Json).versions -contains '0.1.0-preview.1') { throw 'Version already exists; refusing duplicate publication.' }
+          } elseif ($response.StatusCode -ne 404) {
+            throw "Cannot establish version availability: HTTP $($response.StatusCode)"
+          }
+      - name: NuGet trusted login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Publish exact candidate
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push artifacts/packages/Clerk.Blazor.0.1.0-preview.1.nupkg --api-key "$env:NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw 'Publication failed; duplicates are not accepted as success.' }
+      - name: Verify NuGet.org availability and isolated exact-version restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $available = $false
+          for ($attempt = 0; $attempt -lt 60; $attempt++) {
+            $response = Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/clerk.blazor/0.1.0-preview.1/clerk.blazor.nuspec' -SkipHttpErrorCheck
+            if ($response.StatusCode -eq 200) { $available = $true; break }
+            if ($response.StatusCode -ne 404) { throw "NuGet verification returned HTTP $($response.StatusCode)" }
+            Start-Sleep -Seconds 30
+          }
+          if (-not $available) { throw 'Push succeeded but indexing is not confirmed. Do not retry publication; check NuGet.org.' }
+          dotnet new classlib -n PublicRestore -o artifacts/public-restore -f net10.0 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Restore project creation failed.' }
+          dotnet add artifacts/public-restore/PublicRestore.csproj package Clerk.Blazor --version '[0.1.0-preview.1]' --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Exact package reference creation failed.' }
+          '<configuration><packageSources><clear /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>' | Set-Content artifacts/public-restore/NuGet.Config
+          dotnet restore artifacts/public-restore/PublicRestore.csproj --configfile artifacts/public-restore/NuGet.Config --packages artifacts/public-restore/cache --no-http-cache
+          if ($LASTEXITCODE -ne 0) { throw 'Public exact-version restore failed.' }
+          'Published and restored Clerk.Blazor 0.1.0-preview.1: https://www.nuget.org/packages/Clerk.Blazor/0.1.0-preview.1' >> $env:GITHUB_STEP_SUMMARY
