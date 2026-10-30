@@ -6,7 +6,15 @@ The application does not need React source code, npm or a JavaScript build step.
 
 ## Quick start
 
-Reference `src\Clerk.Blazor\Clerk.Blazor.csproj` (or your packaged build), then configure the client:
+The `Clerk.Blazor` preview targets **.NET 10 Blazor WebAssembly**. Server-side Blazor and server-side JWT validation are not provided by this package. This is a community integration, not an official Clerk SDK.
+
+Install the exact preview version:
+
+```powershell
+dotnet add package Clerk.Blazor --version 0.1.0-preview.1
+```
+
+For development before publication, reference `src\Clerk.Blazor\Clerk.Blazor.csproj` or restore the packaged build from a local NuGet feed. Configure the client:
 
 ```csharp
 using Clerk.Blazor;
@@ -199,4 +207,15 @@ dotnet test tests\Sample.Tests -c Release --filter "FullyQualifiedName~ClerkUiLi
 
 The ordinary browser suite uses a contract fake: it verifies loading, props, lifecycle, modal coordination and reactive state, **not Clerk's actual visuals or payment/authentication behavior**. Live smoke tests render real sign-in/up UI and exercise repeated modal triggers at desktop/mobile sizes without authenticating.
 
-The separate real sign-in test requires `CLERK_TEST_EMAIL` and `CLERK_TEST_PASSWORD` and an explicitly selected `ClerkSignInE2ETests` fixture. Billing, Google One Tap, signed-in profiles, session tasks and OAuth consent need their corresponding instance configuration and live scenario coverage. See [the integration matrix](docs/parity.md); this library does not claim exhaustive tested parity with Clerk React.
+The separate real sign-in test requires `CLERK_TEST_EMAIL` and `CLERK_TEST_PASSWORD` and an explicitly selected `ClerkSignInE2ETests` fixture. Billing, Google One Tap, signed-in profiles, session tasks and OAuth consent need their corresponding instance configuration and live scenario coverage. See [the integration matrix](https://github.com/MisinformedDNA/clerk-blazor/blob/main/docs/parity.md); this library does not claim exhaustive tested parity with Clerk React.
+
+## Packaging and releases
+
+```powershell
+dotnet test tests\Clerk.Blazor.Tests -c Release
+dotnet pack src\Clerk.Blazor\Clerk.Blazor.csproj -c Release -o artifacts\packages
+```
+
+The package includes this README, the MIT license, and the Razor static web assets under `_content/Clerk.Blazor`. The bridge loads its JavaScript and stylesheet automatically; no npm build or manual asset copy is required.
+
+Before publishing, verify the package ID, exact version, repository revision, dependencies and static web assets. NuGet versions are immutable: an existing version is not a successful new release. Publishing to NuGet.org requires an authorized package owner and a configured publishing credential; prefer NuGet trusted publishing with a narrowly scoped release workflow. Never put API keys in source, shell history or logs.

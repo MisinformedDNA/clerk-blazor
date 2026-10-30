@@ -4,6 +4,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>Clerk.Blazor</PackageId>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>MisinformedDNA</Authors>
+    <Description>Clerk authentication for Blazor WebAssembly, with official Clerk UI components, reactive authentication state, and typed C# services.</Description>
+    <PackageTags>clerk;blazor;webassembly;authentication</PackageTags>
+    <PackageProjectUrl>https://github.com/MisinformedDNA/clerk-blazor</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MisinformedDNA/clerk-blazor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +23,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Clerk.Blazor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
