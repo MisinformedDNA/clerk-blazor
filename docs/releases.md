@@ -31,6 +31,8 @@ Run **Publish Clerk.Blazor preview** manually from the Actions page, selecting *
 
 The credential-free build job checks out the pinned source, runs the unit tests, packs Release, inspects identity, metadata, dependencies and byte-identical documentation/static assets, and uploads the exact candidate. Review its output and hash before approving the environment-gated publishing job.
 
+Both jobs use `ubuntu-latest`; the package has no Windows-specific SDK or API requirement. Scripts use PowerShell Core, which is preinstalled on GitHub's Ubuntu runners, for the same .NET XML/ZIP/hash inspection logic on either platform. All workflow paths use portable forward slashes.
+
 The publishing job alone receives `id-token: write`. It checks version availability, obtains a short-lived credential with the pinned official `NuGet/login` action and pushes the one explicit package file. Duplicate versions fail; the workflow never uses `--skip-duplicate` or chooses another version.
 
 After push, the workflow waits up to 30 minutes for NuGet indexing and restores `[0.1.0-preview.1]` into an isolated cache using only NuGet.org. If indexing verification times out after a successful push, investigate the existing upload; do not blindly rerun publication.
